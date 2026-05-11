@@ -39,7 +39,6 @@
 ### 前置条件
 
 - Docker
-- 代理（可选，用于加速构建下载）
 
 ### 构建镜像
 
@@ -52,35 +51,16 @@ docker build \
   -t md-standalone:latest \
   --network=host \
   .
-```
 
-> 如需使用代理加速构建，添加环境变量：
->
-> ```sh
-> export http_proxy="http://127.0.0.1:7890"
-> export https_proxy="http://127.0.0.1:7890"
-> ```
+```
 
 ### 启动容器
 
 ```sh
-docker run -d \
-  --name md \
-  -p 8888:80 \
-  md-standalone:latest
+docker run -d --name md -p 8888:80 md-standalone:latest
 ```
 
 访问 `http://localhost:8888` 即可使用。
-
-### 更新镜像
-
-```sh
-cd md
-git pull
-docker build -f docker/latest/Dockerfile.standalone.local -t md-standalone:latest --network=host .
-docker stop md && docker rm md
-docker run -d --name md -p 8888:80 md-standalone:latest
-```
 
 ## 🔧 技术栈
 

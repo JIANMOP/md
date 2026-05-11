@@ -1,4 +1,4 @@
-# 本项目是基于原始项目和 PR # 1140 的合并，加入了 webdav 存储功能，可以选择保存数据至云存储而不是浏览器本地，方便不同设备的 markdown 书写。
+本项目是基于原始项目和 PR # 1140 的合并，加入了 webdav 存储功能，可以选择保存数据至云存储而不是浏览器本地，方便不同设备的 markdown 书写。
 
 ```sh
 git clone https://github.com/JIANMOP/md.git

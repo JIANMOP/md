@@ -432,8 +432,15 @@ function createPasteHandler() {
 
 // --- CodeMirror creation ---
 function createFormTextArea(dom: HTMLDivElement) {
+  // 确保有文档数据
+  const currentPost = posts.value[currentPostIndex.value]
+  if (!currentPost) {
+    console.warn('No post available, waiting for data to load')
+    return null
+  }
+
   const state = EditorState.create({
-    doc: posts.value[currentPostIndex.value].content,
+    doc: currentPost.content,
     extensions: [
       markdownSetup({
         onSearch: openSearchWithSelection,
@@ -477,11 +484,14 @@ function createFormTextArea(dom: HTMLDivElement) {
 }
 
 // --- Lifecycle ---
-onMounted(() => {
+onMounted(async () => {
   const editorDom = editorRef.value
   if (editorDom == null) {
     return
   }
+
+  // 等待文档数据加载完成
+  await postStore.loadFromStorage()
 
   renderStore.initRendererInstance({
     isMacCodeBlock: themeStore.isMacCodeBlock,
@@ -492,10 +502,12 @@ onMounted(() => {
 
   nextTick(() => {
     const editorView = createFormTextArea(editorDom)
-    editor.value = editorView
+    if (editorView) {
+      editor.value = editorView
 
-    editorRefresh()
-    mdLocalToRemote()
+      editorRefresh()
+      mdLocalToRemote()
+    }
   })
 
   document.addEventListener(`keydown`, handleGlobalKeydown, { passive: false, capture: false })

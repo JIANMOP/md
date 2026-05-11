@@ -40,6 +40,7 @@ function editorRefresh() {
 const aboutDialogVisible = ref(false)
 const fundDialogVisible = ref(false)
 const editorStateDialogVisible = ref(false)
+const documentStorageDialogVisible = ref(false)
 const markdownHelpDialogVisible = ref(false)
 
 function handleOpenAbout() {
@@ -52,6 +53,10 @@ function handleOpenFund() {
 
 function handleOpenEditorState() {
   editorStateDialogVisible.value = true
+}
+
+function handleOpenDocumentStorage() {
+  documentStorageDialogVisible.value = true
 }
 
 function handleOpenMarkdownHelp() {
@@ -242,7 +247,10 @@ function copyToWeChat() {
     <!-- 桌面端左侧菜单 -->
     <div class="space-x-1 hidden md:flex">
       <Menubar class="menubar border-0">
-        <FileDropdown @open-editor-state="handleOpenEditorState" />
+        <FileDropdown
+          @open-editor-state="handleOpenEditorState"
+          @open-document-storage="handleOpenDocumentStorage"
+        />
         <EditDropdown @copy="handleCopy" />
         <FormatDropdown />
         <InsertDropdown />
@@ -261,7 +269,11 @@ function copyToWeChat() {
             </Button>
           </MenubarTrigger>
           <MenubarContent align="start">
-            <FileDropdown :as-sub="true" @open-editor-state="handleOpenEditorState" />
+            <FileDropdown
+              :as-sub="true"
+              @open-editor-state="handleOpenEditorState"
+              @open-document-storage="handleOpenDocumentStorage"
+            />
             <EditDropdown :as-sub="true" @copy="handleCopy" />
             <FormatDropdown :as-sub="true" />
             <InsertDropdown :as-sub="true" />
@@ -304,6 +316,7 @@ function copyToWeChat() {
   <AboutDialog :visible="aboutDialogVisible" @close="aboutDialogVisible = false" />
   <FundDialog :visible="fundDialogVisible" @close="fundDialogVisible = false" />
   <EditorStateDialog :visible="editorStateDialogVisible" @close="editorStateDialogVisible = false" />
+  <DocumentStorageDialog v-model:open="documentStorageDialogVisible" />
   <MarkdownHelpDialog :visible="markdownHelpDialogVisible" @close="markdownHelpDialogVisible = false" />
   <AIImageGeneratorPanel v-model:open="uiStore.aiImageDialogVisible" />
 </template>

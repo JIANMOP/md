@@ -25,6 +25,9 @@ func main() {
 	// Gitee 图床上传：/api/upload/gitee
 	mutex.HandleFunc("/api/upload/gitee", handleGiteeUpload)
 
+	// 图片代理（绕过防盗链）：/api/image/?url=...
+	mutex.HandleFunc("/api/image/", handleImageProxy)
+
 	// 静态文件
 	mutex.Handle("/", http.FileServer(http.FS(md)))
 
@@ -137,4 +140,26 @@ func handleGiteeUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
+}
+
+// handleImageProxy 图片代理，从远端下载图片返回（绕过防盗链）
+func handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	imageURL := r.URL.Query().Get("url")
+	if imageURL == "" {
+		http.Error(w, "missing url parameter", http.StatusBadRequest)
+		return
+	}
+
+	client := &http.Client{}
+	resp, err := client.Get(imageURL)
+	if err != nil {
+		http.Error(w, "failed to fetch image: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }

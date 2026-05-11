@@ -1,0 +1,14 @@
+# 使用本地代码构建 assets（前端产物）
+FROM --platform=$BUILDPLATFORM node:22-alpine AS builder
+ENV LANG="en_US.UTF-8"
+ENV LANGUAGE="en_US.UTF-8"
+ENV LC_ALL="en_US.UTF-8"
+WORKDIR /app
+COPY . .
+RUN npm install -g pnpm@10.33.4
+ENV NODE_OPTIONS="--openssl-legacy-provider"
+RUN pnpm install && pnpm web build:h5-netlify
+
+FROM scratch
+LABEL MAINTAINER="ylb<contact@yanglibin.info>"
+COPY --from=builder /app/apps/web/dist /app/assets

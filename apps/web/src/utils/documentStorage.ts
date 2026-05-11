@@ -6,6 +6,35 @@
 import COS from 'cos-js-sdk-v5'
 import { store } from './storage'
 
+const BASE = import.meta.env.BASE_URL
+
+/**
+ * 通过本地服务端代理发送请求，解决跨域问题
+ */
+async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  // 如果已经是同源或相对路径，直接请求
+  try {
+    const parsed = new URL(url, window.location.origin)
+    if (parsed.origin === window.location.origin) {
+      return fetch(url, options)
+    }
+  }
+  catch {
+    return fetch(url, options)
+  }
+
+  // 通过服务端代理转发
+  const proxyURL = `${BASE}api/proxy/?url=${encodeURIComponent(url)}`
+  const { method, headers, body } = options
+  const proxyOptions: RequestInit = { method }
+  if (headers)
+    proxyOptions.headers = headers
+  if (body)
+    proxyOptions.body = body
+
+  return fetch(proxyURL, proxyOptions)
+}
+
 /**
  * 文档数据结构
  */
@@ -415,7 +444,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
       const url = `${this.config.url}${this.config.path}/documents.json`
       console.log('WebDAV GET:', url)
 
-      const response = await fetch(url, {
+      const response = await proxyFetch(url, {
         method: `GET`,
         headers: {
           Authorization: `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,
@@ -444,7 +473,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
     const url = `${this.config.url}${this.config.path}/documents.json`
     console.log('WebDAV PUT:', url)
 
-    const response = await fetch(url, {
+    const response = await proxyFetch(url, {
       method: `PUT`,
       headers: {
         'Authorization': `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,
@@ -463,7 +492,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
 
     try {
       const url = `${this.config.url}${this.config.path}/current.txt`
-      const response = await fetch(url, {
+      const response = await proxyFetch(url, {
         method: `GET`,
         headers: {
           Authorization: `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,
@@ -485,7 +514,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
     await this.ensureConfig()
 
     const url = `${this.config.url}${this.config.path}/current.txt`
-    await fetch(url, {
+    await proxyFetch(url, {
       method: `PUT`,
       headers: {
         'Authorization': `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,
@@ -502,7 +531,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
       const url = `${this.config.url}${this.config.path}/config.json`
       console.log('WebDAV GET config:', url)
 
-      const response = await fetch(url, {
+      const response = await proxyFetch(url, {
         method: `GET`,
         headers: {
           Authorization: `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,
@@ -534,7 +563,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
     const url = `${this.config.url}${this.config.path}/config.json`
     console.log('WebDAV PUT config:', url, config)
 
-    const response = await fetch(url, {
+    const response = await proxyFetch(url, {
       method: `PUT`,
       headers: {
         'Authorization': `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,
@@ -552,7 +581,7 @@ export class WebDAVDocumentEngine implements DocumentStorageEngine {
     await this.ensureConfig()
 
     try {
-      const response = await fetch(this.config.url, {
+      const response = await proxyFetch(this.config.url, {
         method: `OPTIONS`,
         headers: {
           Authorization: `Basic ${btoa(`${this.config.username}:${this.config.password}`)}`,

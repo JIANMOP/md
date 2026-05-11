@@ -1,0 +1,36 @@
+# 使用本地代码构建 standalone 版本
+# 合并 Dockerfile.base + Dockerfile.standalone，无需依赖外部镜像
+
+ARG VER_GOLANG=1.25.2-alpine
+ARG VER_ALPINE=3.20
+
+# 阶段1: 构建前端 assets
+FROM --platform=$BUILDPLATFORM node:22-alpine AS builder
+ENV LANG="en_US.UTF-8"
+ENV LANGUAGE="en_US.UTF-8"
+ENV LC_ALL="en_US.UTF-8"
+ENV CI=true
+WORKDIR /app
+COPY . .
+RUN npm install -g pnpm@10.33.4 && \
+    pnpm install
+ENV NODE_OPTIONS="--openssl-legacy-provider"
+RUN pnpm web build:h5-netlify
+
+# 阶段2: 编译 Go 服务
+FROM --platform=$BUILDPLATFORM golang:$VER_GOLANG AS gobuilder
+ARG TARGETARCH
+ARG TARGETOS
+WORKDIR /app
+COPY --from=builder /app/apps/web/dist /app/assets
+COPY docker/latest/server/main.go .
+ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
+RUN go build -ldflags "-w -s" -o md main.go && \
+    cp md md.minify
+
+# 阶段3: 最终运行时镜像
+FROM alpine:$VER_ALPINE
+LABEL MAINTAINER="ylb<contact@yanglibin.info>"
+COPY --from=gobuilder /app/md.minify /bin/md
+EXPOSE 80
+CMD ["md"]

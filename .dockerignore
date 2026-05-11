@@ -1,0 +1,12 @@
+.git
+node_modules
+apps/web/dist
+apps/web/.ext
+packages/md-cli/dist
+.husky
+.github
+*.md
+LICENSE
+docs
+.gitignore
+.gitmodules

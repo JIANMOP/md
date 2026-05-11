@@ -2,7 +2,8 @@
 
 ```sh
 git clone https://github.com/JIANMOP/md.git
-cd md && docker build \
+cd md
+docker build \
   -f docker/latest/Dockerfile.standalone.local \
   -t md-standalone:pr-1140 \
   --build-arg BUILDPLATFORM="linux/amd64" \

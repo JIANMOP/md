@@ -28,6 +28,56 @@ const webdavConfig = store.reactive(`webdavDocConfig`, {
 async function webdavSubmit(formValues: any) {
   Object.assign(webdavConfig.value, formValues)
   toast.success(`WebDAV 配置已保存`)
+
+  // 尝试从云端加载数据，如果云端有数据就覆盖本地
+  // 如果云端没有数据，则将本地数据同步到云端
+  try {
+    const currentType = documentStorage.getCurrentType()
+    await documentStorage.setStorageType('webdav')
+
+    const remoteData = await documentStorage.downloadFromRemote()
+
+    if (remoteData.documents && remoteData.documents.length > 0) {
+      // 云端有数据 → 加载到本地
+      postStore.posts = remoteData.documents
+      if (remoteData.currentId) {
+        postStore.currentPostId = remoteData.currentId
+      }
+
+      // 配置也同步到本地
+      if (remoteData.config) {
+        const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
+        await localEngine.saveProjectConfig(remoteData.config)
+      }
+
+      // 恢复存储类型为本地
+      await documentStorage.setStorageType(currentType)
+      toast.success(`已从 WebDAV 加载文档和配置到本地`)
+    }
+    else {
+      // 云端没有数据 → 将本地数据同步到云端
+      const currentDocuments = postStore.posts
+      const currentId = postStore.currentPostId
+      const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
+      const config = await localEngine.getProjectConfig()
+
+      await documentStorage.saveDocuments(currentDocuments as any[])
+      await documentStorage.saveCurrentDocumentId(currentId)
+      if (config) {
+        await documentStorage.saveProjectConfig(config)
+      }
+
+      await documentStorage.setStorageType(currentType)
+      toast.success(`本地文档和配置已同步到 WebDAV`)
+    }
+  }
+  catch (error: any) {
+    console.error(`Failed to sync with WebDAV:`, error)
+    toast.error(`配置已保存，但与 WebDAV 同步失败: ${error.message}`)
+    // 恢复存储类型
+    try { await documentStorage.setStorageType('localStorage') }
+    catch {}
+  }
 }
 
 // 腾讯云 COS 配置
@@ -50,6 +100,53 @@ const cosConfig = store.reactive(`cosDocConfig`, {
 async function cosSubmit(formValues: any) {
   Object.assign(cosConfig.value, formValues)
   toast.success(`腾讯云 COS 配置已保存`)
+
+  // 尝试从云端加载数据，如果云端有数据就覆盖本地
+  // 如果云端没有数据，则将本地数据同步到云端
+  try {
+    const currentType = documentStorage.getCurrentType()
+    await documentStorage.setStorageType('cos')
+
+    const remoteData = await documentStorage.downloadFromRemote()
+
+    if (remoteData.documents && remoteData.documents.length > 0) {
+      // 云端有数据 → 加载到本地
+      postStore.posts = remoteData.documents
+      if (remoteData.currentId) {
+        postStore.currentPostId = remoteData.currentId
+      }
+
+      if (remoteData.config) {
+        const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
+        await localEngine.saveProjectConfig(remoteData.config)
+      }
+
+      await documentStorage.setStorageType(currentType)
+      toast.success(`已从 COS 加载文档和配置到本地`)
+    }
+    else {
+      // 云端没有数据 → 将本地数据同步到云端
+      const currentDocuments = postStore.posts
+      const currentId = postStore.currentPostId
+      const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
+      const config = await localEngine.getProjectConfig()
+
+      await documentStorage.saveDocuments(currentDocuments as any[])
+      await documentStorage.saveCurrentDocumentId(currentId)
+      if (config) {
+        await documentStorage.saveProjectConfig(config)
+      }
+
+      await documentStorage.setStorageType(currentType)
+      toast.success(`本地文档和配置已同步到 COS`)
+    }
+  }
+  catch (error: any) {
+    console.error(`Failed to sync with COS:`, error)
+    toast.error(`配置已保存，但与 COS 同步失败: ${error.message}`)
+    try { await documentStorage.setStorageType('localStorage') }
+    catch {}
+  }
 }
 
 const options = [

@@ -124,7 +124,9 @@ async function giteeUpload(content: any, filename: string) {
   const { username, repo, branch, accessToken } = await getConfig(useDefault, `gitee`)
   const dir = getDir()
   const dateFilename = getDateFilename(filename)
-  const url = `https://gitee.com/api/v5/repos/${username}/${repo}/contents/${dir}/${dateFilename}`
+
+  // 通过 Go 后端代理转发请求，绕过 Gitee 防盗链
+  const proxyURL = `/api/upload/gitee`
   const res = await fetch<{ content: {
     download_url: string
   } }, {
@@ -137,13 +139,15 @@ async function giteeUpload(content: any, filename: string) {
       }
     }
   }>({
-    url,
+    url: proxyURL,
     method: `POST`,
     data: {
       content,
-      branch,
-      access_token: accessToken,
-      message: `Upload by ${window.location.href}`,
+      filename: `${dir}/${dateFilename}`,
+      username,
+      repo,
+      branch: branch || `master`,
+      accessToken,
     },
   })
   res.content = res.data?.content || res.content

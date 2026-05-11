@@ -28,6 +28,20 @@ async function githubSubmit(formValues: any) {
   toast.success(`保存成功`)
 }
 
+// gitee
+const giteeSchema = toTypedSchema(yup.object({
+  repo: yup.string().required(`Gitee 仓库不能为空`),
+  branch: yup.string().optional(),
+  accessToken: yup.string().required(`Gitee Token 不能为空`),
+}))
+
+const giteeConfig = store.reactive(`giteeConfig`, { repo: ``, branch: ``, accessToken: `` })
+
+async function giteeSubmit(formValues: any) {
+  Object.assign(giteeConfig.value, formValues)
+  toast.success(`保存成功`)
+}
+
 // 阿里云
 const aliOSSSchema = toTypedSchema(yup.object({
   accessKeyId: yup.string().required(`AccessKey ID 不能为空`),
@@ -297,6 +311,10 @@ const options = [
   {
     value: `github`,
     label: `GitHub`,
+  },
+  {
+    value: `gitee`,
+    label: `Gitee`,
   },
   {
     value: `aliOSS`,
@@ -584,6 +602,61 @@ function onTabScroll(e: WheelEvent) {
                   target="_blank"
                 >
                   如何获取 GitHub Token？
+                </Button>
+              </FormItem>
+            </div>
+
+            <DialogFooter class="p-1">
+              <Button type="submit">
+                保存配置
+              </Button>
+            </DialogFooter>
+          </Form>
+        </TabsContent>
+
+        <TabsContent value="gitee" class="flex-1 flex flex-col overflow-hidden">
+          <Form :validation-schema="giteeSchema" :initial-values="giteeConfig" class="flex flex-col flex-1 overflow-hidden" @submit="giteeSubmit">
+            <div class="flex-1 overflow-y-auto p-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <Field v-slot="{ field, errorMessage }" name="repo">
+                <FormItem label="Gitee 仓库" required :error="errorMessage">
+                  <Input
+                    v-bind="field"
+                    v-model="field.value"
+                    placeholder="如：gitee.com/username/repo"
+                  />
+                </FormItem>
+              </Field>
+
+              <Field v-slot="{ field, errorMessage }" name="branch">
+                <FormItem label="分支" :error="errorMessage">
+                  <Input
+                    v-bind="field"
+                    v-model="field.value"
+                    placeholder="默认 master"
+                  />
+                </FormItem>
+              </Field>
+
+              <Field v-slot="{ field, errorMessage }" name="accessToken">
+                <FormItem label="Token" required :error="errorMessage">
+                  <Input
+                    v-bind="field"
+                    v-model="field.value"
+                    type="password"
+                    placeholder="Gitee 个人访问令牌"
+                  />
+                </FormItem>
+              </Field>
+
+              <FormItem>
+                <Button
+                  variant="link"
+                  class="p-0 h-auto text-left whitespace-normal"
+                  as="a"
+                  href="https://gitee.com/profile/personal_access_tokens"
+                  target="_blank"
+                >
+                  如何获取 Gitee Token？
                 </Button>
               </FormItem>
             </div>

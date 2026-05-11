@@ -151,9 +151,7 @@ async function giteeUpload(content: any, filename: string) {
     },
   })
   res.content = res.data?.content || res.content
-  const url = encodeURI(res.content.download_url)
-  // 通过本地代理加载图片，绕过 Gitee 防盗链
-  return `/api/image/?url=${encodeURIComponent(url)}`
+  return encodeURI(res.content.download_url)
 }
 
 // -----------------------------------------------------------------------

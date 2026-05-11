@@ -94,6 +94,18 @@ export const useRenderStore = defineStore(`render`, () => {
     // 后处理 HTML
     output.value = postProcessHtml(baseHtml, readingTimeResult, renderer)
 
+    // 替换 Gitee 图片链接为本地代理，绕过防盗链
+    output.value = output.value.replace(
+      /<img\s[^>]*?src="https:\/\/gitee\.com\/([^"]+)"/g,
+      (match, url) => {
+        const encodedUrl = encodeURIComponent(`https://gitee.com/${url}`)
+        return match.replace(
+          `src="https://gitee.com/${url}"`,
+          `src="/api/image/?url=${encodedUrl}"`,
+        )
+      },
+    )
+
     // 提取标题
     extractTitles()
 

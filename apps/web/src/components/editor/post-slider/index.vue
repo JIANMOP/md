@@ -467,49 +467,6 @@ onUnmounted(() => {
 })
 
 
-/** 将选中的文档归档到 WebDAV */
-async function archiveSelectedToWebDAV() {
-  if (!selectedPostIds.value.length) {
-    toast.error(`请先选择要归档的文档`)
-    return
-  }
-
-  // 获取当前归档侧边栏浏览的子目录
-  const targetDir = webdavBrowserRef.value?.currentDirRelPath || ''
-
-  // 批量归档选中文档
-  const { exportToArchiveDir } = await import(`@/utils/webdavArchive`)
-  let successCount = 0
-  let failCount = 0
-  const successIds: string[] = []
-  for (const id of selectedPostIds.value) {
-    const post = postStore.getPostById(id)
-    if (post) {
-      try {
-        await exportToArchiveDir(post.content, post.title, targetDir)
-        successCount++
-        successIds.push(id)
-      }
-      catch {
-        failCount++
-      }
-    }
-  }
-  if (successCount > 0) {
-    const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
-    toast.success(`已归档 ${successCount} 篇到 ${dirLabel}`)
-    // 刷新归档列表 + 删除已归档的文档
-    for (const id of successIds) {
-      postStore.delPost(id)
-    }
-    selectedPostIds.value = []
-    webdavBrowserRef.value?.loadFiles()
-  }
-  if (failCount > 0) {
-    toast.error(`${failCount} 篇归档失败`)
-  }
-}
-
 /** 将归档文件加载到编辑器（同名文档则覆盖，否则新建） */
 function openArchiveInEditor(content: string, title: string) {
   // 查找是否有同名文档

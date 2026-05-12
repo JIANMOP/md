@@ -56,13 +56,27 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, key := range []string{"Authorization", "Content-Type"} {
+	for _, key := range []string{"Authorization", "Content-Type", "Depth", "Destination", "Overwrite"} {
 		if v := r.Header.Get(key); v != "" {
 			proxyReq.Header.Set(key, v)
 		}
 	}
 
-	client := &http.Client{}
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 重定向时保留原始请求头
+			if len(via) > 0 {
+				for k, v := range via[0].Header {
+					req.Header[k] = v
+				}
+			}
+			// 最多允许 5 次重定向
+			if len(via) >= 5 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		http.Error(w, "proxy request failed: "+err.Error(), http.StatusBadGateway)

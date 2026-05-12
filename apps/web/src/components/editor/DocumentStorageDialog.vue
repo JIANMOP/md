@@ -16,6 +16,7 @@ const webdavSchema = toTypedSchema(yup.object({
   username: yup.string().required(`用户名不能为空`),
   password: yup.string().required(`密码不能为空`),
   path: yup.string().optional(),
+  archivePath: yup.string().optional(),
 }))
 
 const webdavConfig = store.reactive(`webdavDocConfig`, {
@@ -23,57 +24,64 @@ const webdavConfig = store.reactive(`webdavDocConfig`, {
   username: ``,
   password: ``,
   path: `/md-documents`,
+  archivePath: `/`,
 })
 
 async function webdavSubmit(formValues: any) {
   Object.assign(webdavConfig.value, formValues)
   toast.success(`WebDAV 配置已保存`)
 
-  // 尝试从云端加载数据，如果云端有数据就覆盖本地
-  // 如果云端没有数据，则将本地数据同步到云端
+  // config.json 只存编辑器偏好（UI/Theme/Post 配置），不包含账密/图床
+  // 同步逻辑与 documents.json 一致：远端有则拉取，没有则上传本地
   try {
     const currentType = documentStorage.getCurrentType()
     await documentStorage.setStorageType('webdav')
 
+    // 1. 先尝试拉取远端 config.json
+    const remoteConfig = await documentStorage.getProjectConfig()
+
+    if (remoteConfig && Object.keys(remoteConfig).length > 0) {
+      // 远端有配置 → 覆盖本地
+      const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
+      await localEngine.saveProjectConfig(remoteConfig)
+    }
+    else {
+      // 远端没有配置 → 上传本地配置
+      const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
+      const localConfig = await localEngine.getProjectConfig()
+      if (localConfig) {
+        await documentStorage.saveProjectConfig(localConfig)
+      }
+    }
+
+    // 2. 再拉取云端 documents.json
     const remoteData = await documentStorage.downloadFromRemote()
 
     if (remoteData.documents && remoteData.documents.length > 0) {
-      // 云端有数据 → 加载到本地
+      // 云端有文档 → 加载到本地
       postStore.posts = remoteData.documents
       if (remoteData.currentId) {
         postStore.currentPostId = remoteData.currentId
       }
 
-      // 配置也同步到本地
-      if (remoteData.config) {
-        const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
-        await localEngine.saveProjectConfig(remoteData.config)
-      }
-
-      // 恢复存储类型为本地
       await documentStorage.setStorageType(currentType)
-      toast.success(`已从 WebDAV 加载文档和配置到本地`)
+      toast.success(`WebDAV 配置已保存，文档已从云端加载到本地`)
     }
     else {
-      // 云端没有数据 → 将本地数据同步到云端
+      // 云端没有文档 → 将本地文档上传到云端
       const currentDocuments = postStore.posts
       const currentId = postStore.currentPostId
-      const localEngine = new (await import('@/utils/documentStorage')).LocalStorageDocumentEngine()
-      const config = await localEngine.getProjectConfig()
 
       await documentStorage.saveDocuments(currentDocuments as any[])
       await documentStorage.saveCurrentDocumentId(currentId)
-      if (config) {
-        await documentStorage.saveProjectConfig(config)
-      }
 
       await documentStorage.setStorageType(currentType)
-      toast.success(`本地文档和配置已同步到 WebDAV`)
+      toast.success(`WebDAV 配置已保存，本地文档已同步到云端`)
     }
   }
   catch (error: any) {
     console.error(`Failed to sync with WebDAV:`, error)
-    toast.error(`配置已保存，但与 WebDAV 同步失败: ${error.message}`)
+    toast.success(`配置已保存，但文档同步失败: ${error.message}`)
     // 恢复存储类型
     try { await documentStorage.setStorageType('localStorage') }
     catch {}
@@ -454,12 +462,25 @@ onMounted(async () => {
             </Field>
 
             <Field v-slot="{ field, errorMessage }" name="path">
-              <FormItem label="存储路径" :error="errorMessage">
+              <FormItem label="文档存储路径" :error="errorMessage">
                 <Input
                   v-bind="field"
                   v-model="field.value"
                   placeholder="如：/md-documents，可不填"
                 />
+              </FormItem>
+            </Field>
+
+            <Field v-slot="{ field, errorMessage }" name="archivePath">
+              <FormItem label="归档目录" :error="errorMessage">
+                <Input
+                  v-bind="field"
+                  v-model="field.value"
+                  placeholder="如：/md-archive，导出到此目录归档"
+                />
+                <p class="text-xs text-muted-foreground mt-1">
+                  编辑器内「导出到归档目录」的默认目标路径
+                </p>
               </FormItem>
             </Field>
 

@@ -3,6 +3,7 @@ import type { Post, PostItemProps } from '@/types/post'
 import {
   ChevronRight,
   Copy,
+  Cloud,
   Edit3,
   Ellipsis,
   FileDown,
@@ -17,6 +18,8 @@ import { useTemplateStore } from '@/stores/template'
 import { useUIStore } from '@/stores/ui'
 import { downloadMD } from '@/utils'
 
+const hasArchiveConfig = ref(false)
+
 const props = defineProps<PostItemProps>()
 
 const postStore = usePostStore()
@@ -24,6 +27,34 @@ const templateStore = useTemplateStore()
 const uiStore = useUIStore()
 const { posts, currentPostId } = storeToRefs(postStore)
 const { toggleShowTemplateDialog } = uiStore
+
+async function checkConfig() {
+  const { checkArchiveConfigured } = await import('@/utils/webdavArchive')
+  hasArchiveConfig.value = await checkArchiveConfigured()
+}
+checkConfig()
+
+async function archiveToWebDAV(postId: string) {
+  const post = posts.value.find(p => p.id === postId)
+  if (!post) return
+  const [{ exportToArchiveDir }, { store }] = await Promise.all([
+    import('@/utils/webdavArchive'),
+    import('@/utils/storage'),
+  ])
+  const targetDir = (await store.get('lastArchiveDir')) || ''
+  try {
+    await exportToArchiveDir(post.content, post.title, targetDir)
+    const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
+    toast.success(`「${post.title}」已归档到 ${dirLabel}`)
+    // 触发归档完成事件，让 index.vue 刷新侧边栏并删除
+    window.dispatchEvent(new CustomEvent('archive-completed', {
+      detail: { title: post.title },
+    }))
+  }
+  catch (error: any) {
+    toast.error(`归档失败：${error.message}`)
+  }
+}
 
 const { drag, actions } = props
 const isSelectMode = computed(() => props.select?.isSelectMode ?? false)
@@ -207,6 +238,12 @@ function cancelInlineRename() {
           <DropdownMenuSeparator />
           <DropdownMenuItem @click.stop="downloadMD(post.content, post.title)">
             <FileDown class="mr-2 size-4" /> 导出 .md
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            :disabled="!hasArchiveConfig"
+            @click.stop="archiveToWebDAV(post.id)"
+          >
+            <Cloud class="mr-2 size-4" /> 归档到 WebDAV
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem @click.stop="saveAsTemplate(post.id)">

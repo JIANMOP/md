@@ -8,6 +8,7 @@ import { useThemeStore } from '@/stores/theme'
 import { useUIStore } from '@/stores/ui'
 import { downloadFile } from '@/utils'
 import { copyPlain } from '@/utils/clipboard'
+import { store } from '@/utils/storage'
 
 const props = defineProps({
   visible: {
@@ -66,6 +67,7 @@ function getAllStoreStates() {
     isOpenRightSlider: uiStore.isOpenRightSlider,
     isOpenPostSlider: uiStore.isOpenPostSlider,
     showAIToolbox: uiStore.showAIToolbox,
+    enableImageReupload: uiStore.enableImageReupload,
 
     // Theme store 的状态
     theme: themeStore.theme,
@@ -105,7 +107,26 @@ function getAllStoreStates() {
 
 async function fetchStoreStates() {
   try {
-    const states = getAllStoreStates()
+    const states = getAllStoreStates() as Record<string, any>
+    // 额外从 localStorage 读取图床和存储配置
+    states.githubConfig = await store.getJSON(`githubConfig`, null)
+    states.giteeConfig = await store.getJSON(`giteeConfig`, null)
+    states.aliOSSConfig = await store.getJSON(`aliOSSConfig`, null)
+    states.txCOSConfig = await store.getJSON(`txCOSConfig`, null)
+    states.qiniuConfig = await store.getJSON(`qiniuConfig`, null)
+    states.minioConfig = await store.getJSON(`minioConfig`, null)
+    states.telegramConfig = await store.getJSON(`telegramConfig`, null)
+    states.mpConfig = await store.getJSON(`mpConfig`, null)
+    states.r2Config = await store.getJSON(`r2Config`, null)
+    states.upyunConfig = await store.getJSON(`upyunConfig`, null)
+    states.cloudinaryConfig = await store.getJSON(`cloudinaryConfig`, null)
+    states.imgHost = await store.get(`imgHost`) || null
+    states.useCompression = await store.getJSON(`useCompression`, null)
+    states.webdavDocConfig = await store.getJSON(`webdavDocConfig`, null)
+    states.cosDocConfig = await store.getJSON(`cosDocConfig`, null)
+    states.docStorageType = await store.get(`docStorageType`) || null
+    states.formCustomConfig = await store.getJSON(`formCustomConfig`, null)
+
     storeStates.value = {
       data: states,
       selected: Object.keys(states).reduce((acc, key) => {
@@ -152,7 +173,7 @@ const filteredImportJSON = computed(() => {
     return acc
   }, {} as Record<string, any>)
 })
-function exportSelectedConfig() {
+async function exportSelectedConfig() {
   const selectedConfig = Object.keys(storeStates.value.data).reduce((acc, key) => {
     if (storeStates.value.selected[key]) {
       acc[key] = storeStates.value.data[key]
@@ -160,8 +181,12 @@ function exportSelectedConfig() {
     return acc
   }, {} as Record<string, any>)
 
-  downloadFile(JSON.stringify(selectedConfig, null, 2), `exported_config.json`, `application/json`)
-  toast.success(`配置文件导出成功`)
+  // 导出时加密敏感字段
+  const { encryptSensitiveFields } = await import(`@/utils/encryptConfig`)
+  const encryptedConfig = await encryptSensitiveFields(selectedConfig)
+
+  downloadFile(JSON.stringify(encryptedConfig, null, 2), `exported_config.json`, `application/json`)
+  toast.success(`配置文件导出成功（密码/token 已加密）`)
   emit(`close`)
 }
 
@@ -241,13 +266,24 @@ function handleFileImport(event: Event) {
 }
 
 // 应用导入的配置
-function applyImportedConfig() {
+async function applyImportedConfig() {
   if (!filteredImportJSON.value)
     return
 
+  // 导入时先解密敏感字段
+  const { decryptSensitiveFields } = await import(`@/utils/encryptConfig`)
+  let decryptedData = importStates.value.data
+  try {
+    decryptedData = await decryptSensitiveFields(importStates.value.data)
+  }
+  catch {
+    // 解密失败（数据未加密），使用原始数据
+    decryptedData = importStates.value.data
+  }
+
   Object.keys(importStates.value.selected).forEach((key) => {
-    if (importStates.value.selected[key] && importStates.value.data?.[key] !== undefined) {
-      const value = importStates.value.data[key]
+    if (importStates.value.selected[key] && decryptedData?.[key] !== undefined) {
+      const value = decryptedData[key]
 
       // UI store 的状态
       if (key === `isDark`)
@@ -260,6 +296,8 @@ function applyImportedConfig() {
         uiStore.isOpenPostSlider = value
       else if (key === `showAIToolbox`)
         uiStore.showAIToolbox = value
+      else if (key === `enableImageReupload`)
+        uiStore.enableImageReupload = value
 
       // Theme store 的状态
       else if (key === `theme`)
@@ -318,6 +356,46 @@ function applyImportedConfig() {
         uiStore.aiDialogVisible = value
       else if (key === `aiImageDialogVisible`)
         uiStore.aiImageDialogVisible = value
+
+      // 图床配置 — 写入 localStorage
+      else if (key === `githubConfig`)
+        store.setJSON(`githubConfig`, value)
+      else if (key === `giteeConfig`)
+        store.setJSON(`giteeConfig`, value)
+      else if (key === `aliOSSConfig`)
+        store.setJSON(`aliOSSConfig`, value)
+      else if (key === `txCOSConfig`)
+        store.setJSON(`txCOSConfig`, value)
+      else if (key === `qiniuConfig`)
+        store.setJSON(`qiniuConfig`, value)
+      else if (key === `minioConfig`)
+        store.setJSON(`minioConfig`, value)
+      else if (key === `telegramConfig`)
+        store.setJSON(`telegramConfig`, value)
+      else if (key === `mpConfig`)
+        store.setJSON(`mpConfig`, value)
+      else if (key === `r2Config`)
+        store.setJSON(`r2Config`, value)
+      else if (key === `upyunConfig`)
+        store.setJSON(`upyunConfig`, value)
+      else if (key === `cloudinaryConfig`)
+        store.setJSON(`cloudinaryConfig`, value)
+      else if (key === `imgHost`)
+        store.set(`imgHost`, value)
+      else if (key === `useCompression`)
+        store.setJSON(`useCompression`, value)
+
+      // 文档存储配置 — 写入 localStorage
+      else if (key === `webdavDocConfig`)
+        store.setJSON(`webdavDocConfig`, value)
+      else if (key === `cosDocConfig`)
+        store.setJSON(`cosDocConfig`, value)
+      else if (key === `docStorageType`)
+        store.set(`docStorageType`, value)
+
+      // 自定义表单
+      else if (key === `formCustomConfig`)
+        store.setJSON(`formCustomConfig`, value)
     }
   })
 

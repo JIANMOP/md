@@ -191,34 +191,13 @@ export class LocalStorageDocumentEngine implements DocumentStorageEngine {
       const postStore = usePostStore()
 
       const config: ProjectConfig = {
-        // ========== 图床配置 ==========
-        githubConfig: await store.getJSON(`githubConfig`, null),
-        aliOSSConfig: await store.getJSON(`aliOSSConfig`, null),
-        txCOSConfig: await store.getJSON(`txCOSConfig`, null),
-        qiniuConfig: await store.getJSON(`qiniuConfig`, null),
-        minioConfig: await store.getJSON(`minioConfig`, null),
-        telegramConfig: await store.getJSON(`telegramConfig`, null),
-        mpConfig: await store.getJSON(`mpConfig`, null),
-        r2Config: await store.getJSON(`r2Config`, null),
-        upyunConfig: await store.getJSON(`upyunConfig`, null),
-        cloudinaryConfig: await store.getJSON(`cloudinaryConfig`, null),
-        imgHost: await store.get(`imgHost`) || undefined,
-        useCompression: (await store.getJSON(`useCompression`, null)) ?? undefined,
-
-        // ========== 文档存储配置 ==========
-        webdavDocConfig: await store.getJSON(`webdavDocConfig`, null),
-        cosDocConfig: await store.getJSON(`cosDocConfig`, null),
-        docStorageType: (await store.get(`docStorageType`)) || undefined,
-
-        // ========== 自定义表单配置 ==========
-        formCustomConfig: await store.getJSON(`formCustomConfig`, null),
-
         // ========== UI Store 状态（运行时值）==========
         isDark: uiStore.isDark,
         isEditOnLeft: uiStore.isEditOnLeft,
         isOpenRightSlider: uiStore.isOpenRightSlider,
         isOpenPostSlider: uiStore.isOpenPostSlider,
         showAIToolbox: uiStore.showAIToolbox,
+        enableImageReupload: uiStore.enableImageReupload,
 
         // ========== Theme Store 状态（运行时值）==========
         theme: themeStore.theme,
@@ -243,6 +222,19 @@ export class LocalStorageDocumentEngine implements DocumentStorageEngine {
         // ========== 其他配置 ==========
         copyMode: (await store.getJSON(`MD__copyMode`, null)) ?? undefined,
         sortMode: (await store.getJSON(`MD__sort_mode`, null)) ?? undefined,
+        // 显示配置
+        isShowCssEditor: uiStore.isShowCssEditor,
+        isShowInsertFormDialog: uiStore.isShowInsertFormDialog,
+        isShowUploadImgDialog: uiStore.isShowUploadImgDialog,
+        isShowInsertMpCardDialog: uiStore.isShowInsertMpCardDialog,
+        aiDialogVisible: uiStore.aiDialogVisible,
+        aiImageDialogVisible: uiStore.aiImageDialogVisible,
+        // 渲染配置
+        titleList: (await import('@/stores/render')).useRenderStore().titleList,
+        readingTime: (await import('@/stores/render')).useRenderStore().readingTime,
+        // 文章相关
+        currentPostId: postStore.currentPostId,
+        posts: postStore.posts,
       }
 
       // 过滤掉 null 值
@@ -253,7 +245,7 @@ export class LocalStorageDocumentEngine implements DocumentStorageEngine {
         }
       }
 
-      console.log('LocalStorage getProjectConfig:', filteredConfig)
+      console.log('LocalStorage getProjectConfig (preferences only):', Object.keys(filteredConfig))
       return Object.keys(filteredConfig).length > 0 ? filteredConfig : null
     }
     catch (error) {
@@ -263,14 +255,17 @@ export class LocalStorageDocumentEngine implements DocumentStorageEngine {
   }
 
   async saveProjectConfig(config: ProjectConfig): Promise<void> {
-    console.log('LocalStorage saveProjectConfig:', config)
+    console.log('LocalStorage saveProjectConfig:', Object.keys(config))
 
     try {
-      // 先保存图床配置和其他非 Store 配置到 localStorage
+      // 先解密敏感字段
+      const { decryptSensitiveFields } = await import(`@/utils/encryptConfig`)
+      const decryptedConfig = await decryptSensitiveFields(config as Record<string, any>)
+
       const configsToSave: Record<string, any> = {}
       const storeConfigs: Record<string, any> = {}
 
-      for (const [key, value] of Object.entries(config)) {
+      for (const [key, value] of Object.entries(decryptedConfig)) {
         if (value === undefined || value === null)
           continue
 

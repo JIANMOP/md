@@ -21,6 +21,14 @@ const uiStore = useUIStore()
 const { isOpenPostSlider, isOpenFolderPanel } = storeToRefs(uiStore)
 const { toggleShowTemplateDialog, toggleShowImportMdDialog } = uiStore
 
+const hasArchiveConfig = ref(false)
+
+async function checkArchiveConfig() {
+  const { checkArchiveConfigured } = await import('@/utils/webdavArchive')
+  hasArchiveConfig.value = await checkArchiveConfigured()
+}
+checkArchiveConfig()
+
 function openEditorStateDialog() {
   emit(`openEditorState`)
 }
@@ -44,6 +52,10 @@ function exportEditorContent2PureHTML() {
 
 function exportEditorContent2MD() {
   exportStore.exportEditorContent2MD(editorStore.getContent())
+}
+
+function exportEditorContent2Archive() {
+  exportStore.exportEditorContent2Archive()
 }
 
 function downloadAsCardImage() {
@@ -94,6 +106,13 @@ function exportEditorContent2PDF() {
           <MenubarItem @click="exportEditorContent2MD()">
             <FileText class="mr-2 size-4" />
             Markdown 文件
+          </MenubarItem>
+          <MenubarItem
+            :disabled="!hasArchiveConfig"
+            @click="exportEditorContent2Archive()"
+          >
+            <Cloud class="mr-2 size-4" />
+            导出到归档目录
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem @click="exportEditorContent2HTML()">
@@ -186,6 +205,13 @@ function exportEditorContent2PDF() {
           <MenubarItem @click="exportEditorContent2MD()">
             <FileText class="mr-2 size-4" />
             Markdown 文件
+          </MenubarItem>
+          <MenubarItem
+            :disabled="!hasArchiveConfig"
+            @click="exportEditorContent2Archive()"
+          >
+            <Cloud class="mr-2 size-4" />
+            导出到归档目录
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem @click="exportEditorContent2HTML()">

@@ -11,6 +11,8 @@ import {
 import { usePostStore } from './post'
 import { useRenderStore } from './render'
 import { useUIStore } from './ui'
+import { exportToArchiveDir } from '@/utils/webdavArchive'
+import { toast } from 'vue-sonner'
 
 /**
  * 导出功能 Store
@@ -113,6 +115,33 @@ export const useExportStore = defineStore(`export`, () => {
     downloadMD(content, currentPost.title)
   }
 
+  // 导出编辑器内容到 WebDAV 归档目录
+  const exportEditorContent2Archive = async () => {
+    const currentPost = postStore.currentPost
+    if (!currentPost)
+      return
+
+    try {
+      const { store } = await import('@/utils/storage')
+      const targetDir = (await store.get('lastArchiveDir')) || ''
+      const result = await exportToArchiveDir(currentPost.content, currentPost.title, targetDir)
+      if (result) {
+        const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
+        toast.success(`已归档到 ${dirLabel}`)
+        // 触发归档完成事件，让 index.vue 刷新侧边栏并删除
+        window.dispatchEvent(new CustomEvent('archive-completed', {
+          detail: { title: currentPost.title },
+        }))
+      }
+      else {
+        toast.error(`归档失败：WebDAV 未配置`)
+      }
+    }
+    catch (error: any) {
+      toast.error(`归档失败：${error.message}`)
+    }
+  }
+
   return {
     editorContent2HTML,
     exportEditorContent2HTML,
@@ -120,5 +149,10 @@ export const useExportStore = defineStore(`export`, () => {
     downloadAsCardImage,
     exportEditorContent2PDF,
     exportEditorContent2MD,
+    exportEditorContent2Archive,
   }
 })
+
+/**
+ * 解析编辑器内容中的图片链接
+ */

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { CheckSquare, ChevronsDownUp, ChevronsUpDown, Ellipsis, FileText, Plus, Regex, Replace, ReplaceAll, Search, X } from 'lucide-vue-next'
+import { CheckSquare, ChevronsDownUp, ChevronsUpDown, Cloud, Ellipsis, FileText, Plus, Regex, Replace, ReplaceAll, Search, X } from 'lucide-vue-next'
 import { useConfirmStore } from '@/stores/confirm'
 import { useEditorStore } from '@/stores/editor'
 import { usePostStore } from '@/stores/post'
 import { useUIStore } from '@/stores/ui'
 import { addPrefix, downloadMD, exportPostsAsZip } from '@/utils'
 import { store } from '@/utils/storage'
+import WebDAVArchiveBrowser from './WebDAVArchiveBrowser.vue'
 
 const confirmStore = useConfirmStore()
 const uiStore = useUIStore()
@@ -393,6 +394,152 @@ const dragover = ref(false)
 const dragSourceId = ref<string | null>(null)
 const dropTargetId = ref<string | null>(null)
 
+/* ============ 上下分栏 ============ */
+/** 上方内容管理区域占比（0~1），默认 50% */
+const splitRatio = ref(0.5)
+const isDraggingSplit = ref(false)
+
+function startSplitDrag(e: MouseEvent) {
+  isDraggingSplit.value = true
+  const startY = e.clientY
+  const startRatio = splitRatio.value
+  const container = (e.target as HTMLElement).closest(`.split-container`) as HTMLElement | null
+  if (!container)
+    return
+
+  function onMouseMove(ev: MouseEvent) {
+    const rect = container!.getBoundingClientRect()
+    const deltaY = ev.clientY - startY
+    const ratio = startRatio + deltaY / rect.height
+    splitRatio.value = Math.max(0.15, Math.min(0.85, ratio))
+  }
+
+  function onMouseUp() {
+    isDraggingSplit.value = false
+    document.removeEventListener(`mousemove`, onMouseMove)
+    document.removeEventListener(`mouseup`, onMouseUp)
+    document.body.style.cursor = ``
+    document.body.style.userSelect = ``
+  }
+
+  document.addEventListener(`mousemove`, onMouseMove)
+  document.addEventListener(`mouseup`, onMouseUp)
+  document.body.style.cursor = `row-resize`
+  document.body.style.userSelect = `none`
+}
+
+/* ============ 文档拖拽到归档区 ============ */
+const webdavBrowserRef = ref<InstanceType<typeof WebDAVArchiveBrowser> | null>(null)
+/** WebDAV 整体是否已配置（控制侧边栏显隐） */
+const hasWebDAV = ref(false)
+/** 归档目录是否已配置（控制按钮是否可用） */
+const hasArchiveConfig = ref(false)
+
+function onArchiveConfigured(configured: boolean) {
+  hasArchiveConfig.value = configured
+}
+
+async function checkWebDAV() {
+  const { store: storageStore } = await import(`@/utils/storage`)
+  const config: any = await storageStore.getJSON(`webdavDocConfig`, null)
+  hasWebDAV.value = !!(config?.url && config?.username && config?.password)
+}
+checkWebDAV()
+
+// 监听归档完成事件 → 刷新归档侧边栏 + 删除已归档的文档
+function handleArchiveCompleted(e: Event) {
+  const detail = (e as CustomEvent).detail
+  if (detail?.title) {
+    // 删除内容管理中的同名文档
+    const post = postStore.posts.find(p => p.title === detail.title)
+    if (post) {
+      postStore.delPost(post.id)
+    }
+  }
+  // 刷新归档侧边栏
+  webdavBrowserRef.value?.loadFiles()
+}
+onMounted(() => {
+  window.addEventListener('archive-completed', handleArchiveCompleted)
+})
+onUnmounted(() => {
+  window.removeEventListener('archive-completed', handleArchiveCompleted)
+})
+
+
+/** 将选中的文档归档到 WebDAV */
+async function archiveSelectedToWebDAV() {
+  if (!selectedPostIds.value.length) {
+    toast.error(`请先选择要归档的文档`)
+    return
+  }
+
+  // 获取当前归档侧边栏浏览的子目录
+  const targetDir = webdavBrowserRef.value?.currentDirRelPath || ''
+
+  // 批量归档选中文档
+  const { exportToArchiveDir } = await import(`@/utils/webdavArchive`)
+  let successCount = 0
+  let failCount = 0
+  const successIds: string[] = []
+  for (const id of selectedPostIds.value) {
+    const post = postStore.getPostById(id)
+    if (post) {
+      try {
+        await exportToArchiveDir(post.content, post.title, targetDir)
+        successCount++
+        successIds.push(id)
+      }
+      catch {
+        failCount++
+      }
+    }
+  }
+  if (successCount > 0) {
+    const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
+    toast.success(`已归档 ${successCount} 篇到 ${dirLabel}`)
+    // 刷新归档列表 + 删除已归档的文档
+    for (const id of successIds) {
+      postStore.delPost(id)
+    }
+    selectedPostIds.value = []
+    webdavBrowserRef.value?.loadFiles()
+  }
+  if (failCount > 0) {
+    toast.error(`${failCount} 篇归档失败`)
+  }
+}
+
+/** 将归档文件加载到编辑器（同名文档则覆盖，否则新建） */
+function openArchiveInEditor(content: string, title: string) {
+  // 查找是否有同名文档
+  const existing = postStore.posts.find(p => p.title === title)
+  if (existing) {
+    // 已有同名 → 覆盖内容
+    postStore.updatePostContent(existing.id, content)
+    if (editor.value) {
+      const ed = toRaw(editor.value)
+      ed.dispatch({
+        changes: { from: 0, to: ed.state.doc.length, insert: content },
+      })
+    }
+    toast.success(`已加载「${title}」（覆盖内容）`)
+  }
+  else {
+    // 没有同名 → 新建文档
+    postStore.addPost(title, null)
+    const newPost = postStore.posts[postStore.posts.length - 1]
+    postStore.updatePostContent(newPost.id, content)
+    if (editor.value) {
+      const ed = toRaw(editor.value)
+      ed.dispatch({
+        changes: { from: 0, to: ed.state.doc.length, insert: content },
+      })
+    }
+    toast.success(`已加载「${title}」`)
+  }
+}
+
 /* ============ 选择模式 ============ */
 const isSelectMode = ref(false)
 const selectedPostIds = ref<string[]>([])
@@ -410,6 +557,49 @@ const selectProps = computed(() => ({
 function toggleSelectMode() {
   isSelectMode.value = !isSelectMode.value
   selectedPostIds.value = []
+}
+
+/** 将选中的文档归档到 WebDAV */
+async function archiveSelectedToWebDAV() {
+  if (!selectedPostIds.value.length) {
+    toast.error('请先选择要归档的文档')
+    return
+  }
+
+  // 获取当前归档侧边栏浏览的子目录
+  const targetDir = webdavBrowserRef.value?.currentDirRelPath || ''
+
+  // 批量归档选中文档
+  const { exportToArchiveDir } = await import('@/utils/webdavArchive')
+  let successCount = 0
+  let failCount = 0
+  const successIds: string[] = []
+  for (const id of selectedPostIds.value) {
+    const post = postStore.getPostById(id)
+    if (post) {
+      try {
+        await exportToArchiveDir(post.content, post.title, targetDir)
+        successCount++
+        successIds.push(id)
+      }
+      catch {
+        failCount++
+      }
+    }
+  }
+  if (successCount > 0) {
+    const dirLabel = targetDir ? `「${targetDir}」` : '归档根目录'
+    toast.success(`已归档 ${successCount} 篇到 ${dirLabel}`)
+    // 刷新归档列表 + 删除已归档的文档
+    for (const id of successIds) {
+      postStore.delPost(id)
+    }
+    selectedPostIds.value = []
+    webdavBrowserRef.value?.loadFiles()
+  }
+  if (failCount > 0) {
+    toast.error(`${failCount} 篇归档失败`)
+  }
 }
 
 function toggleSelectPost(id: string) {
@@ -585,329 +775,351 @@ function handleDragEnd() {
     @dragend="handleDragEnd"
   >
     <nav
-      class="h-full flex flex-col overflow-hidden"
+      class="split-container h-full flex flex-col overflow-hidden select-none"
       @dragover="handleDragOver"
       @drop.prevent="handleDrop(null)"
     >
-      <!-- 标题栏 -->
-      <div class="flex items-center h-10 px-3 shrink-0">
-        <span class="inline-flex items-center text-muted-foreground select-none">
-          <FileText class="size-4" />
-        </span>
-        <span
-          v-if="posts.length"
-          class="ml-1.5 inline-flex items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground min-w-[18px] h-[18px]"
-        >
-          {{ posts.length }}
-        </span>
-        <span class="flex-1" />
-
-        <!-- 搜索 -->
-        <button
-          class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150"
-          :class="{ 'text-primary bg-primary/10': isSearching }"
-          @click="toggleSearch"
-        >
-          <Search class="size-4" />
-        </button>
-
-        <!-- 多选 -->
-        <button
-          class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150"
-          :class="{ 'text-primary bg-primary/10': isSelectMode }"
-          :title="isSelectMode ? '退出选择' : '多选操作'"
-          @click="toggleSelectMode"
-        >
-          <CheckSquare class="size-4" />
-        </button>
-
-        <!-- 新增 -->
-        <button
-          class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150"
-          @click="isOpenAddDialog = true"
-        >
-          <Plus class="size-4" />
-        </button>
-
-        <!-- 更多操作 -->
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150">
-              <Ellipsis class="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-48">
-            <DropdownMenuLabel class="text-xs text-muted-foreground font-normal">
-              排序方式
-            </DropdownMenuLabel>
-            <DropdownMenuRadioGroup v-model="sortMode">
-              <DropdownMenuRadioItem value="A-Z">
-                文件名（A-Z）
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="Z-A">
-                文件名（Z-A）
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="update-new-old">
-                编辑时间（新→旧）
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="update-old-new">
-                编辑时间（旧→新）
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="create-new-old">
-                创建时间（新→旧）
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="create-old-new">
-                创建时间（旧→新）
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem @click="postStore.collapseAllPosts">
-              <ChevronsDownUp class="mr-2 size-4" />
-              全部收起
-            </DropdownMenuItem>
-            <DropdownMenuItem @click="postStore.expandAllPosts">
-              <ChevronsUpDown class="mr-2 size-4" />
-              全部展开
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <!-- 关闭 -->
-        <button
-          class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150 ml-0.5"
-          @click="isOpenPostSlider = false"
-        >
-          <X class="size-4" />
-        </button>
-      </div>
-
-      <!-- 搜索栏 -->
-      <div v-if="isSearching" class="px-2 pb-1.5 shrink-0 space-y-1">
-        <div class="relative">
-          <input
-            ref="searchInputRef"
-            v-model="searchQuery"
-            class="w-full h-8 rounded-md border border-border bg-background px-2.5 pr-20 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
-            placeholder="搜索"
-            @keydown.escape="closeSearch"
+      <!-- 上半部分：内容管理 -->
+      <div
+        class="flex flex-col overflow-hidden"
+        :style="{ height: `${splitRatio * 100}%`, minHeight: '120px' }"
+      >
+        <!-- 标题栏 -->
+        <div class="flex items-center h-10 px-3 shrink-0">
+          <span class="inline-flex items-center text-muted-foreground select-none">
+            <FileText class="size-4" />
+          </span>
+          <span
+            v-if="posts.length"
+            class="ml-1.5 inline-flex items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground min-w-[18px] h-[18px]"
           >
-          <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-            <button
-              class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
-              :class="{ 'text-primary bg-primary/10': isRegex }"
-              title="正则表达式"
-              @click="isRegex = !isRegex"
-            >
-              <Regex class="size-3" />
-            </button>
-            <button
-              class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
-              :class="{ 'text-primary bg-primary/10': isCaseSensitive }"
-              title="区分大小写"
-              @click="isCaseSensitive = !isCaseSensitive"
-            >
-              <span class="text-[10px] font-bold">Aa</span>
-            </button>
-            <button
-              v-if="searchQuery"
-              class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
-              @click="searchQuery = ''"
-            >
-              <X class="size-3" />
-            </button>
-          </div>
-        </div>
+            {{ posts.length }}
+          </span>
+          <span class="flex-1" />
 
-        <!-- 替换栏 -->
-        <div class="relative">
-          <input
-            v-model="replaceQuery"
-            class="w-full h-8 rounded-md border border-border bg-background px-2.5 pr-16 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
-            placeholder="替换为…"
+          <!-- 搜索 -->
+          <button
+            class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150"
+            :class="{ 'text-primary bg-primary/10': isSearching }"
+            @click="toggleSearch"
           >
-          <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-            <button
-              class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors disabled:opacity-35"
-              title="替换一处"
-              :disabled="!searchQuery || totalMatches === 0"
-              @click="replaceFirst"
-            >
-              <Replace class="size-3" />
-            </button>
-            <button
-              class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors disabled:opacity-35"
-              title="全部替换"
-              :disabled="!searchQuery || totalMatches === 0"
-              @click="replaceAll"
-            >
-              <ReplaceAll class="size-3" />
-            </button>
-          </div>
-        </div>
-      </div>
+            <Search class="size-4" />
+          </button>
 
-      <!-- 搜索结果 -->
-      <div v-if="isSearching && searchQuery.trim()" class="flex-1 overflow-y-auto px-1.5 py-0.5 thin-scrollbar">
-        <!-- 匹配统计 -->
-        <div v-if="totalMatches > 0" class="px-2 py-1 text-xs text-muted-foreground/60">
-          共 {{ totalMatches }} 处匹配，{{ searchResults.length }} 篇内容
-        </div>
-        <template v-if="searchResults.length">
-          <a
-            v-for="result in searchResults"
-            :key="result.id"
-            class="group relative flex w-full cursor-pointer flex-col gap-0.5 rounded-lg px-2 py-[7px] text-[13px] leading-snug transition-all duration-150 ease-out"
-            :class="{
-              'bg-accent text-accent-foreground font-medium': postStore.currentPostId === result.id,
-              'text-foreground/70 hover:text-foreground hover:bg-accent/50': postStore.currentPostId !== result.id,
-            }"
-            @click="postStore.currentPostId = result.id; closeSearch()"
+          <!-- 多选 -->
+          <button
+            class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150"
+            :class="{ 'text-primary bg-primary/10': isSelectMode }"
+            :title="isSelectMode ? '退出选择' : '多选操作'"
+            @click="toggleSelectMode"
           >
-            <span
-              v-if="postStore.currentPostId === result.id"
-              class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-primary"
-            />
-            <span class="truncate select-none">
-              <template v-for="(part, i) in result.titleParts" :key="i">
-                <mark v-if="part.highlight" class="bg-primary/20 text-inherit rounded-sm px-px">{{ part.text }}</mark>
-                <span v-else>{{ part.text }}</span>
-              </template>
-            </span>
-            <span
-              v-if="result.snippetParts.length"
-              class="text-[11px] text-muted-foreground/60 truncate"
-            >
-              <template v-for="(part, i) in result.snippetParts" :key="i">
-                <mark v-if="part.highlight" class="bg-primary/20 text-inherit rounded-sm px-px">{{ part.text }}</mark>
-                <span v-else>{{ part.text }}</span>
-              </template>
-            </span>
-          </a>
-        </template>
-        <div v-else class="flex flex-col items-center justify-center gap-2 py-12 px-6">
-          <Search class="size-5 text-muted-foreground/30" />
-          <p class="text-xs text-muted-foreground/50">
-            没有匹配的内容
-          </p>
-        </div>
-      </div>
+            <CheckSquare class="size-4" />
+          </button>
 
-      <!-- 内容列表 -->
-      <div v-else class="flex-1 overflow-y-auto px-1.5 py-0.5 thin-scrollbar">
-        <PostItem
-          v-if="sortedPosts.length"
-          :parent-id="null"
-          :sorted-posts="sortedPosts"
-          :actions="{
-            startRenamePost,
-            openHistoryDialog,
-            startDelPost,
-            openAddPostDialog,
-          }"
-          :drag="{
-            dragSourceId,
-            dropTargetId,
-            setDragSourceId: (id: string | null) => (dragSourceId = id),
-            setDropTargetId: (id: string | null) => (dropTargetId = id),
-            handleDrop,
-            handleDragEnd,
-          }"
-          :select="selectProps"
-        />
+          <!-- 新增 -->
+          <button
+            class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150"
+            @click="isOpenAddDialog = true"
+          >
+            <Plus class="size-4" />
+          </button>
 
-        <!-- 空状态 -->
-        <div v-else class="flex flex-col items-center justify-center gap-4 py-20 px-6">
-          <div class="flex items-center justify-center size-12 rounded-xl bg-muted/50">
-            <FileText class="size-6 text-muted-foreground/40" />
-          </div>
-          <div class="text-center space-y-1">
-            <p class="text-sm font-medium text-muted-foreground/60">
-              暂无内容
-            </p>
-            <p class="text-xs text-muted-foreground/40">
-              点击上方 + 按钮创建
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 选择模式底部操作栏 -->
-      <Transition name="slide-up">
-        <div
-          v-if="isSelectMode"
-          class="shrink-0 border-t border-border bg-background px-3 pt-2 pb-3 space-y-2"
-        >
-          <!-- 选中信息行 -->
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-muted-foreground">
-              已选
-              <strong class="text-foreground font-semibold">{{ selectedPostIds.length }}</strong>
-              篇
-            </span>
-            <div class="flex items-center gap-2 text-muted-foreground">
-              <button
-                class="hover:text-foreground transition-colors"
-                @click="allSelected ? clearSelection() : selectAll()"
-              >
-                {{ allSelected ? '取消全选' : '全选' }}
+          <!-- 更多操作 -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <button class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150">
+                <Ellipsis class="size-4" />
               </button>
-              <span class="opacity-30">·</span>
-              <button class="hover:text-foreground transition-colors" @click="toggleSelectMode">
-                完成
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-48">
+              <DropdownMenuLabel class="text-xs text-muted-foreground font-normal">
+                排序方式
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup v-model="sortMode">
+                <DropdownMenuRadioItem value="A-Z">
+                  文件名（A-Z）
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="Z-A">
+                  文件名（Z-A）
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="update-new-old">
+                  编辑时间（新→旧）
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="update-old-new">
+                  编辑时间（旧→新）
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="create-new-old">
+                  创建时间（新→旧）
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="create-old-new">
+                  创建时间（旧→新）
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @click="postStore.collapseAllPosts">
+                <ChevronsDownUp class="mr-2 size-4" />
+                全部收起
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="postStore.expandAllPosts">
+                <ChevronsUpDown class="mr-2 size-4" />
+                全部展开
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <!-- 关闭 -->
+          <button
+            class="inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-150 ml-0.5"
+            @click="isOpenPostSlider = false"
+          >
+            <X class="size-4" />
+          </button>
+        </div>
+
+        <!-- 搜索栏 -->
+        <div v-if="isSearching" class="px-2 pb-1.5 shrink-0 space-y-1">
+          <div class="relative">
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              class="w-full h-8 rounded-md border border-border bg-background px-2.5 pr-20 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
+              placeholder="搜索"
+              @keydown.escape="closeSearch"
+            >
+            <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+              <button
+                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+                :class="{ 'text-primary bg-primary/10': isRegex }"
+                title="正则表达式"
+                @click="isRegex = !isRegex"
+              >
+                <Regex class="size-3" />
+              </button>
+              <button
+                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+                :class="{ 'text-primary bg-primary/10': isCaseSensitive }"
+                title="区分大小写"
+                @click="isCaseSensitive = !isCaseSensitive"
+              >
+                <span class="text-[10px] font-bold">Aa</span>
+              </button>
+              <button
+                v-if="searchQuery"
+                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+                @click="searchQuery = ''"
+              >
+                <X class="size-3" />
               </button>
             </div>
           </div>
-          <!-- 操作工具栏 -->
-          <div class="flex">
-            <!-- 导出 -->
-            <button
-              class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-              title="导出"
-              :disabled="!selectedPostIds.length"
-              @click="exportSelected"
+
+          <!-- 替换栏 -->
+          <div class="relative">
+            <input
+              v-model="replaceQuery"
+              class="w-full h-8 rounded-md border border-border bg-background px-2.5 pr-16 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
+              placeholder="替换为…"
             >
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-            </button>
-            <!-- 复制 -->
-            <button
-              class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-              title="复制"
-              :disabled="!selectedPostIds.length"
-              @click="duplicateSelected"
-            >
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            </button>
-            <!-- 合并 -->
-            <button
-              class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-              :title="selectedPostIds.length < 2 ? '至少选择 2 篇才能合并' : '合并'"
-              :disabled="selectedPostIds.length < 2"
-              @click="openMergeDialog"
-            >
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 6H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" /><path d="M16 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3" /><line x1="12" y1="2" x2="12" y2="22" />
-              </svg>
-            </button>
-            <!-- 分隔 -->
-            <div class="mx-1 self-center h-5 w-px bg-border/60 shrink-0" />
-            <!-- 删除 -->
-            <button
-              class="flex flex-1 items-center justify-center rounded-md py-2 text-destructive/60 transition-colors hover:bg-destructive/8 hover:text-destructive disabled:pointer-events-none disabled:opacity-35"
-              :title="selectedPostIds.length >= posts.length ? '至少保留一篇内容' : '删除'"
-              :disabled="!selectedPostIds.length || selectedPostIds.length >= posts.length"
-              @click="openBatchDelConfirm()"
-            >
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-              </svg>
-            </button>
+            <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+              <button
+                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors disabled:opacity-35"
+                title="替换一处"
+                :disabled="!searchQuery || totalMatches === 0"
+                @click="replaceFirst"
+              >
+                <Replace class="size-3" />
+              </button>
+              <button
+                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground/50 hover:text-foreground transition-colors disabled:opacity-35"
+                title="全部替换"
+                :disabled="!searchQuery || totalMatches === 0"
+                @click="replaceAll"
+              >
+                <ReplaceAll class="size-3" />
+              </button>
+            </div>
           </div>
         </div>
-      </Transition>
+
+        <!-- 搜索结果 -->
+        <div v-if="isSearching && searchQuery.trim()" class="flex-1 overflow-y-auto px-1.5 py-0.5 thin-scrollbar">
+          <!-- 匹配统计 -->
+          <div v-if="totalMatches > 0" class="px-2 py-1 text-xs text-muted-foreground/60">
+            共 {{ totalMatches }} 处匹配，{{ searchResults.length }} 篇内容
+          </div>
+          <template v-if="searchResults.length">
+            <a
+              v-for="result in searchResults"
+              :key="result.id"
+              class="group relative flex w-full cursor-pointer flex-col gap-0.5 rounded-lg px-2 py-[7px] text-[13px] leading-snug transition-all duration-150 ease-out"
+              :class="{
+                'bg-accent text-accent-foreground font-medium': postStore.currentPostId === result.id,
+                'text-foreground/70 hover:text-foreground hover:bg-accent/50': postStore.currentPostId !== result.id,
+              }"
+              @click="postStore.currentPostId = result.id; closeSearch()"
+            >
+              <span
+                v-if="postStore.currentPostId === result.id"
+                class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-primary"
+              />
+              <span class="truncate select-none">
+                <template v-for="(part, i) in result.titleParts" :key="i">
+                  <mark v-if="part.highlight" class="bg-primary/20 text-inherit rounded-sm px-px">{{ part.text }}</mark>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+              </span>
+              <span
+                v-if="result.snippetParts.length"
+                class="text-[11px] text-muted-foreground/60 truncate"
+              >
+                <template v-for="(part, i) in result.snippetParts" :key="i">
+                  <mark v-if="part.highlight" class="bg-primary/20 text-inherit rounded-sm px-px">{{ part.text }}</mark>
+                  <span v-else>{{ part.text }}</span>
+                </template>
+              </span>
+            </a>
+          </template>
+          <div v-else class="flex flex-col items-center justify-center gap-2 py-12 px-6">
+            <Search class="size-5 text-muted-foreground/30" />
+            <p class="text-xs text-muted-foreground/50">
+              没有匹配的内容
+            </p>
+          </div>
+        </div>
+
+        <!-- 内容列表 -->
+        <div v-else class="flex-1 overflow-y-auto px-1.5 py-0.5 thin-scrollbar">
+          <PostItem
+            v-if="sortedPosts.length"
+            :parent-id="null"
+            :sorted-posts="sortedPosts"
+            :actions="{
+              startRenamePost,
+              openHistoryDialog,
+              startDelPost,
+              openAddPostDialog,
+            }"
+            :drag="{
+              dragSourceId,
+              dropTargetId,
+              setDragSourceId: (id: string | null) => (dragSourceId = id),
+              setDropTargetId: (id: string | null) => (dropTargetId = id),
+              handleDrop,
+              handleDragEnd,
+            }"
+            :select="selectProps"
+          />
+
+          <!-- 空状态 -->
+          <div v-else class="flex flex-col items-center justify-center gap-4 py-20 px-6">
+            <div class="flex items-center justify-center size-12 rounded-xl bg-muted/50">
+              <FileText class="size-6 text-muted-foreground/40" />
+            </div>
+            <div class="text-center space-y-1">
+              <p class="text-sm font-medium text-muted-foreground/60">
+                暂无内容
+              </p>
+              <p class="text-xs text-muted-foreground/40">
+                点击上方 + 按钮创建
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 选择模式底部操作栏 -->
+        <Transition name="slide-up">
+          <div
+            v-if="isSelectMode"
+            class="shrink-0 border-t border-border bg-background px-3 pt-2 pb-3 space-y-2"
+          >
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-muted-foreground">
+                已选
+                <strong class="text-foreground font-semibold">{{ selectedPostIds.length }}</strong>
+                篇
+              </span>
+              <div class="flex items-center gap-2 text-muted-foreground">
+                <button
+                  class="hover:text-foreground transition-colors"
+                  @click="allSelected ? clearSelection() : selectAll()"
+                >
+                  {{ allSelected ? '取消全选' : '全选' }}
+                </button>
+                <span class="opacity-30">·</span>
+                <button class="hover:text-foreground transition-colors" @click="toggleSelectMode">
+                  完成
+                </button>
+              </div>
+            </div>
+            <div class="flex">
+              <button
+                class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                title="导出"
+                :disabled="!selectedPostIds.length"
+                @click="exportSelected"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+              </button>
+              <button
+                class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                title="归档到 WebDAV"
+                :disabled="!selectedPostIds.length || !hasArchiveConfig"
+                @click="archiveSelectedToWebDAV"
+              >
+                <Cloud class="size-4" />
+              </button>
+              <button
+                class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                title="复制"
+                :disabled="!selectedPostIds.length"
+                @click="duplicateSelected"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              </button>
+              <button
+                class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+                :title="selectedPostIds.length < 2 ? '至少选择 2 篇才能合并' : '合并'"
+                :disabled="selectedPostIds.length < 2"
+                @click="openMergeDialog"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" /><path d="M16 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3" /><line x1="12" y1="2" x2="12" y2="22" /></svg>
+              </button>
+              <div class="mx-1 self-center h-5 w-px bg-border/60 shrink-0" />
+              <button
+                class="flex flex-1 items-center justify-center rounded-md py-2 text-destructive/60 transition-colors hover:bg-destructive/8 hover:text-destructive disabled:pointer-events-none disabled:opacity-35"
+                :title="selectedPostIds.length >= posts.length ? '至少保留一篇内容' : '删除'"
+                :disabled="!selectedPostIds.length || selectedPostIds.length >= posts.length"
+                @click="openBatchDelConfirm()"
+              >
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+              </button>
+            </div>
+          </div>
+        </Transition>
+      </div>
+
+      <!-- 可拖拽分割条 -->
+      <div
+        v-if="hasWebDAV"
+        class="shrink-0 h-2 relative flex items-center justify-center cursor-row-resize hover:bg-accent/50 transition-colors duration-150 group select-none"
+        :class="{ 'bg-accent/50': isDraggingSplit }"
+        @mousedown="startSplitDrag"
+      >
+        <div class="w-8 h-0.5 rounded-full bg-border group-hover:bg-muted-foreground/30 transition-colors duration-150" />
+      </div>
+
+      <!-- 下半部分：WebDAV 归档 -->
+      <div
+        v-if="hasWebDAV"
+        class="flex flex-col overflow-hidden"
+        :style="{ height: `${(1 - splitRatio) * 100}%`, minHeight: '120px' }"
+      >
+        <WebDAVArchiveBrowser
+          ref="webdavBrowserRef"
+          @open-in-editor="openArchiveInEditor"
+          @archive-configured="onArchiveConfigured"
+        />
+      </div>
     </nav>
   </div>
 

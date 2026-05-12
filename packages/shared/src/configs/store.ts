@@ -11,6 +11,7 @@ export const storeLabels: Record<string, string> = {
   isOpenRightSlider: `开启右侧滑块`,
   isOpenPostSlider: `开启右侧发布滑块`,
   showAIToolbox: `AI 工具箱状态`,
+  enableImageReupload: `粘贴图片时自动转存`,
   theme: `主题`,
   fontFamily: `字体`,
   fontSize: `字体大小`,
@@ -32,4 +33,31 @@ export const storeLabels: Record<string, string> = {
   isShowUploadImgDialog: `显示上传图片对话框`,
   aiDialogVisible: `AI 对话框可见`,
   aiImageDialogVisible: `AI 图片生成对话框可见`,
+
+  // 图床配置
+  githubConfig: `GitHub 图床配置`,
+  giteeConfig: `Gitee 图床配置`,
+  aliOSSConfig: `阿里云 OSS 图床配置`,
+  txCOSConfig: `腾讯云 COS 图床配置`,
+  qiniuConfig: `七牛云图床配置`,
+  minioConfig: `MinIO 图床配置`,
+  telegramConfig: `Telegram 图床配置`,
+  mpConfig: `微信公众号图床配置`,
+  r2Config: `Cloudflare R2 图床配置`,
+  upyunConfig: `又拍云图床配置`,
+  cloudinaryConfig: `Cloudinary 图床配置`,
+  imgHost: `默认图床`,
+  useCompression: `图片压缩`,
+
+  // 文档存储配置
+  webdavDocConfig: `WebDAV 文档存储配置`,
+  cosDocConfig: `COS 文档存储配置`,
+  docStorageType: `文档存储类型`,
+
+  // 自定义表单
+  formCustomConfig: `自定义表单配置`,
+
+  // 其他配置
+  copyMode: `复制模式`,
+  sortMode: `排序方式`,
 }

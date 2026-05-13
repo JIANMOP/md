@@ -1,19 +1,19 @@
 <script setup lang="ts">
+import type { ArchiveDirNode, ArchiveFileInfo } from '@/utils/webdavArchive'
 import { ChevronRight, Cloud, FileText, FolderPlus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import {
-  listArchiveTree,
-  readArchiveFileInDir,
+
   checkArchiveConfigured,
   createArchiveSubDir,
-  deleteArchiveFileInDir,
   deleteArchiveDir,
+  deleteArchiveFileInDir,
+  listArchiveTree,
   moveArchiveItem,
-  type ArchiveDirNode,
-  type ArchiveFileInfo,
+  readArchiveFileInDir,
 } from '@/utils/webdavArchive'
 
 const emit = defineEmits<{
-  openInEditor: [content: string, title: string]
+  openInEditor: [content: string, title: string, relDir: string]
   archiveConfigured: [configured: boolean]
 }>()
 
@@ -33,7 +33,7 @@ const newFolderName = ref(``)
 const newFolderParent = ref('')
 
 /** 当前拖拽的源信息 */
-const dragSource = ref<{ type: 'file' | 'dir'; relPath: string; name: string } | null>(null)
+const dragSource = ref<{ type: 'file' | 'dir', relPath: string, name: string } | null>(null)
 /** 当前拖拽悬浮的目标目录路径（用于高亮） */
 const dragOverDir = ref<string | null>(null)
 
@@ -43,8 +43,21 @@ const currentDirRelPath = ref('')
 defineExpose({ loadFiles, currentDirRelPath })
 
 onMounted(async () => {
+  // 恢复上次的记忆：如果有 lastArchiveDir，设为当前目录
+  const { store } = await import('@/utils/storage')
+  const lastDir = await store.get('lastArchiveDir') || ''
+  if (lastDir) {
+    currentDirRelPath.value = lastDir
+  }
   await loadFiles()
 })
+
+/** 同步 currentDirRelPath 到 store（供 PostItem/export 等组件使用） */
+async function syncArchiveDir(dirPath: string) {
+  currentDirRelPath.value = dirPath
+  const { store } = await import('@/utils/storage')
+  await store.set('lastArchiveDir', dirPath)
+}
 
 async function loadFiles() {
   isLoading.value = true
@@ -64,19 +77,45 @@ async function loadFiles() {
   }
   finally {
     isLoading.value = false
+    // 加载完成后，检查是否有展开的目录
+    // 如果没有目录展开，且 currentDirRelPath 不是 tree 中实际存在的目录，清空
+    if (currentDirRelPath.value) {
+      const exists = findDirByRelPath(tree.value, currentDirRelPath.value)
+      if (!exists) {
+        await syncArchiveDir('')
+      }
+    }
   }
+}
+
+/** 在树中查找指定 relPath 的目录 */
+function findDirByRelPath(nodes: ArchiveDirNode[], relPath: string): ArchiveDirNode | null {
+  for (const node of nodes) {
+    if (node.relPath === relPath)
+      return node
+    if (node.children.length) {
+      const found = findDirByRelPath(node.children, relPath)
+      if (found)
+        return found
+    }
+  }
+  return null
 }
 
 /** 展开/收起目录 */
 function toggleDir(node: ArchiveDirNode) {
   if (expandedDirs.value.has(node.relPath)) {
     expandedDirs.value.delete(node.relPath)
+    // 收起的如果是当前目录，检查是否还有其他目录展开
+    if (currentDirRelPath.value === node.relPath) {
+      // 找其他展开的目录
+      const fallback = expandedDirs.value.values().next().value || ''
+      syncArchiveDir(fallback)
+    }
   }
   else {
     expandedDirs.value.add(node.relPath)
-    currentDirRelPath.value = node.relPath
-    // 保存到 store 供其他组件使用
-    import('@/utils/storage').then(m => m.store.set('lastArchiveDir', node.relPath))
+    syncArchiveDir(node.relPath)
   }
 }
 
@@ -85,7 +124,7 @@ async function openFileInDir(filename: string, relDir: string) {
   const content = await readArchiveFileInDir(filename, relDir)
   if (content !== null) {
     const title = filename.endsWith(`.md`) ? filename.slice(0, -3) : filename
-    emit('openInEditor', content, title)
+    emit('openInEditor', content, title, relDir)
   }
   else {
     toast.error(`读取文件失败`)
@@ -126,8 +165,10 @@ async function submitNewFolder() {
 
 /** 删除文件 */
 async function deleteFile(file: ArchiveFileInfo) {
+  // eslint-disable-next-line no-alert
   const ok = confirm(`确认删除「${file.title}」？`)
-  if (!ok) return
+  if (!ok)
+    return
   const result = await deleteArchiveFileInDir(file.filename, file.relDir)
   if (result) {
     toast.success(`已删除「${file.title}」`)
@@ -141,7 +182,9 @@ async function deleteFile(file: ArchiveFileInfo) {
 /** 删除文件夹 */
 async function deleteDir(node: ArchiveDirNode) {
   const msg = `确认删除文件夹「${node.name}」及其所有内容？`
-  if (!confirm(msg)) return
+  // eslint-disable-next-line no-alert
+  if (!confirm(msg))
+    return
   const result = await deleteArchiveDir(node.relPath)
   if (result) {
     toast.success(`已删除文件夹「${node.name}」`)
@@ -193,7 +236,8 @@ async function handleDrop(e: DragEvent, targetRelPath: string) {
   dragOverDir.value = null
 
   const src = dragSource.value
-  if (!src) return
+  if (!src)
+    return
 
   // 不能拖到自身或其子目录
   if (src.type === 'dir') {
@@ -201,7 +245,7 @@ async function handleDrop(e: DragEvent, targetRelPath: string) {
       toast.info(`不能将文件夹拖入自身`)
       return
     }
-    if (targetRelPath.startsWith(src.relPath + `/`)) {
+    if (targetRelPath.startsWith(`${src.relPath}/`)) {
       toast.info(`不能将文件夹拖入其子文件夹`)
       return
     }
@@ -303,7 +347,9 @@ function getTotalFileCount(nodes: ArchiveDirNode[]): number {
         v-else-if="error"
         class="flex flex-col items-center justify-center gap-2 py-8 px-4"
       >
-        <p class="text-xs text-destructive/70">{{ error }}</p>
+        <p class="text-xs text-destructive/70">
+          {{ error }}
+        </p>
         <button class="text-xs text-primary hover:underline" @click="loadFiles">
           重试
         </button>
@@ -334,7 +380,11 @@ function getTotalFileCount(nodes: ArchiveDirNode[]): number {
       </div>
 
       <!-- 树状列表 -->
-      <template v-if="tree.length">
+      <div
+        v-if="tree.length"
+        @dragover.prevent="handleDragOver($event, '')"
+        @drop="handleDrop($event, '')"
+      >
         <template v-for="node in tree" :key="node.relPath || node.href">
           <!-- 根级文件（无目录名的虚拟节点） -->
           <template v-for="file in node.files" :key="file.href">
@@ -502,10 +552,10 @@ function getTotalFileCount(nodes: ArchiveDirNode[]): number {
               </template>
             </div>
           </div>
-        </template>
-      </template>
-    </div>
-  </div>
+        </template>   <!-- v-for 结束 -->
+      </div>           <!-- 树状列表容器结束 -->
+    </div>            <!-- 内容区结束 -->
+  </div>             <!-- 归档区外层结束 -->
 </template>
 
 <style scoped>

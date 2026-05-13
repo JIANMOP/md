@@ -105,7 +105,8 @@ export interface ArchiveDirNode {
  */
 export async function checkArchiveConfigured(): Promise<boolean> {
   const config = await loadConfig()
-  if (!config) return false
+  if (!config)
+    return false
   return !!config.archivePath?.trim()
 }
 
@@ -114,7 +115,8 @@ export async function checkArchiveConfigured(): Promise<boolean> {
  */
 export async function getArchivePath(): Promise<string> {
   const config = await loadConfig()
-  if (config?.archivePath) return config.archivePath
+  if (config?.archivePath)
+    return config.archivePath
   return `/`
 }
 
@@ -191,7 +193,8 @@ export async function exportToArchiveDir(
   let dir = archivePath.endsWith(`/`) ? archivePath : `${archivePath}/`
   if (relDir) {
     const cleanDir = relDir.replace(/^\/+|\/+$/g, ``)
-    if (cleanDir) dir = `${dir}${cleanDir}/`
+    if (cleanDir)
+      dir = `${dir}${cleanDir}/`
   }
 
   // 使用 URL 对象构建
@@ -283,7 +286,7 @@ async function createArchiveDir(config: WebDAVConfig): Promise<void> {
     await proxyFetch(url, {
       method: `MKCOL`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
   }
@@ -298,7 +301,8 @@ async function createArchiveDir(config: WebDAVConfig): Promise<void> {
  */
 export async function createArchiveSubDir(relDir: string): Promise<boolean> {
   const config = await loadConfig()
-  if (!config) return false
+  if (!config)
+    return false
 
   const archivePath = config.archivePath || `/`
   const dir = archivePath.endsWith(`/`) ? archivePath : `${archivePath}/`
@@ -313,7 +317,7 @@ export async function createArchiveSubDir(relDir: string): Promise<boolean> {
     const response = await proxyFetch(url, {
       method: `MKCOL`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
     // 部分 WebDAV 服务器返回 201 Created 或 204 No Content
@@ -338,18 +342,20 @@ function parsePropfindTree(xml: string, config: WebDAVConfig): ArchiveDirNode[] 
   const archiveNormalized = archivePath.replace(/\/+$/, ``)
 
   // 解析所有响应块
-  const responseRegex = /<(?:[a-zA-Z]+:)?response>([\s\S]*?)<\/(?:[a-zA-Z]+:)?response>/gi
+  const responseRegex = /<(?:[a-z]+:)?response>([\s\S]*?)<\/(?:[a-z]+:)?response>/gi
   let match
-  const items: { href: string; isDir: boolean; contentLength: number; lastModified: string }[] = []
+  const items: { href: string, isDir: boolean, contentLength: number, lastModified: string }[] = []
 
   while (true) {
     match = responseRegex.exec(xml)
-    if (!match) break
+    if (!match)
+      break
     const block = match[1]
 
     // 提取 href
-    const hrefMatch = /<(?:[a-zA-Z]+:)?href>([\s\S]*?)<\/(?:[a-zA-Z]+:)?href>/i.exec(block)
-    if (!hrefMatch) continue
+    const hrefMatch = /<(?:[a-z]+:)?href>([\s\S]*?)<\/(?:[a-z]+:)?href>/i.exec(block)
+    if (!hrefMatch)
+      continue
     const rawHref = hrefMatch[1].trim()
     let href: string
     try {
@@ -379,10 +385,10 @@ function parsePropfindTree(xml: string, config: WebDAVConfig): ArchiveDirNode[] 
 
     // ─── 区分目录/文件（三重检测） ───
     // 1. resourcetype 检测
-    const rtBlock = /<(?:[a-zA-Z]+:)?resourcetype>([\s\S]*?)<\/(?:[a-zA-Z]+:)?resourcetype>/i.exec(block)
+    const rtBlock = /<(?:[a-z]+:)?resourcetype>([\s\S]*?)<\/(?:[a-z]+:)?resourcetype>/i.exec(block)
     let isCollectionByRT = false
     if (rtBlock) {
-      isCollectionByRT = /<(?:[a-zA-Z]+:)?collection\s*\/?>/i.test(rtBlock[1])
+      isCollectionByRT = /<(?:[a-z]+:)?collection\s*\/?>/i.test(rtBlock[1])
     }
 
     // 2. href 结尾检测（备用）
@@ -395,14 +401,15 @@ function parsePropfindTree(xml: string, config: WebDAVConfig): ArchiveDirNode[] 
     const isDir = isCollectionByRT || (isCollectionBySlash && !isFileByExt)
 
     // 如果不是目录也不是 .md 文件，跳过
-    if (!isDir && !isFileByExt) continue
+    if (!isDir && !isFileByExt)
+      continue
 
     // 提取大小
-    const sizeMatch = /<(?:[a-zA-Z]+:)?getcontentlength>([\s\S]*?)<\/(?:[a-zA-Z]+:)?getcontentlength>/i.exec(block)
-    const contentLength = sizeMatch ? parseInt(sizeMatch[1].trim(), 10) || 0 : 0
+    const sizeMatch = /<(?:[a-z]+:)?getcontentlength>([\s\S]*?)<\/(?:[a-z]+:)?getcontentlength>/i.exec(block)
+    const contentLength = sizeMatch ? Number.parseInt(sizeMatch[1].trim(), 10) || 0 : 0
 
     // 提取修改时间
-    const modifiedMatch = /<(?:[a-zA-Z]+:)?getlastmodified>([\s\S]*?)<\/(?:[a-zA-Z]+:)?getlastmodified>/i.exec(block)
+    const modifiedMatch = /<(?:[a-z]+:)?getlastmodified>([\s\S]*?)<\/(?:[a-z]+:)?getlastmodified>/i.exec(block)
     const lastModified = modifiedMatch ? modifiedMatch[1].trim() : ``
 
     items.push({ href, isDir, contentLength, lastModified })
@@ -417,7 +424,8 @@ function parsePropfindTree(xml: string, config: WebDAVConfig): ArchiveDirNode[] 
   function getRelPath(href: string): string | null {
     const h = href.replace(/\/+$/, ``)
     const idx = h.indexOf(archiveNormalized)
-    if (idx === -1) return null
+    if (idx === -1)
+      return null
     let rel = h.slice(idx + archiveNormalized.length)
     rel = rel.replace(/^\/+|\/+$/g, ``)
     return rel || null
@@ -429,9 +437,11 @@ function parsePropfindTree(xml: string, config: WebDAVConfig): ArchiveDirNode[] 
 
   // 先处理目录
   for (const item of items) {
-    if (!item.isDir) continue
+    if (!item.isDir)
+      continue
     const relPath = getRelPath(item.href)
-    if (!relPath) continue
+    if (!relPath)
+      continue
 
     const name = relPath.split(`/`).pop() || relPath
     const node: ArchiveDirNode = {
@@ -457,10 +467,12 @@ function parsePropfindTree(xml: string, config: WebDAVConfig): ArchiveDirNode[] 
 
   // 处理文件
   for (const item of items) {
-    if (item.isDir) continue
+    if (item.isDir)
+      continue
 
     const relPath = getRelPath(item.href)
-    if (!relPath) continue
+    if (!relPath)
+      continue
 
     const parts = relPath.split(`/`)
     const filename = parts.pop() || ``
@@ -523,7 +535,7 @@ export async function readArchiveFile(filename: string): Promise<string | null> 
     const response = await proxyFetch(url, {
       method: `GET`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
 
@@ -545,13 +557,15 @@ export async function readArchiveFile(filename: string): Promise<string | null> 
  */
 export async function readArchiveFileInDir(filename: string, relDir: string): Promise<string | null> {
   const config = await loadConfig()
-  if (!config) return null
+  if (!config)
+    return null
 
   const archivePath = config.archivePath || `/`
   let dir = archivePath.endsWith(`/`) ? archivePath : `${archivePath}/`
   if (relDir) {
     const cleanDir = relDir.replace(/^\/+|\/+$/g, ``)
-    if (cleanDir) dir = `${dir}${cleanDir}/`
+    if (cleanDir)
+      dir = `${dir}${cleanDir}/`
   }
 
   const urlObj = new URL(config.url)
@@ -562,10 +576,11 @@ export async function readArchiveFileInDir(filename: string, relDir: string): Pr
     const response = await proxyFetch(url, {
       method: `GET`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
-    if (!response.ok) return null
+    if (!response.ok)
+      return null
     return await response.text()
   }
   catch {
@@ -591,7 +606,7 @@ export async function deleteArchiveFile(filename: string): Promise<boolean> {
     const response = await proxyFetch(url, {
       method: `DELETE`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
     return response.ok
@@ -607,13 +622,15 @@ export async function deleteArchiveFile(filename: string): Promise<boolean> {
  */
 export async function deleteArchiveFileInDir(filename: string, relDir: string): Promise<boolean> {
   const config = await loadConfig()
-  if (!config) return false
+  if (!config)
+    return false
 
   const archivePath = config.archivePath || `/`
   let dir = archivePath.endsWith(`/`) ? archivePath : `${archivePath}/`
   if (relDir) {
     const cleanDir = relDir.replace(/^\/+|\/+$/g, ``)
-    if (cleanDir) dir = `${dir}${cleanDir}/`
+    if (cleanDir)
+      dir = `${dir}${cleanDir}/`
   }
 
   const urlObj = new URL(config.url)
@@ -624,7 +641,7 @@ export async function deleteArchiveFileInDir(filename: string, relDir: string): 
     const response = await proxyFetch(url, {
       method: `DELETE`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
     return response.ok
@@ -640,12 +657,14 @@ export async function deleteArchiveFileInDir(filename: string, relDir: string): 
  */
 export async function deleteArchiveDir(relDir: string): Promise<boolean> {
   const config = await loadConfig()
-  if (!config) return false
+  if (!config)
+    return false
 
   const archivePath = config.archivePath || `/`
   let dir = archivePath.endsWith(`/`) ? archivePath : `${archivePath}/`
   const cleanDir = relDir.replace(/^\/+|\/+$/g, ``)
-  if (cleanDir) dir = `${dir}${cleanDir}/`
+  if (cleanDir)
+    dir = `${dir}${cleanDir}/`
 
   const urlObj = new URL(config.url)
   urlObj.pathname = `${urlObj.pathname.replace(/\/$/, ``)}${dir}`
@@ -655,7 +674,7 @@ export async function deleteArchiveDir(relDir: string): Promise<boolean> {
     const response = await proxyFetch(url, {
       method: `DELETE`,
       headers: {
-        'Authorization': getAuthHeader(config.username, config.password),
+        Authorization: getAuthHeader(config.username, config.password),
       },
     })
     return response.ok
@@ -674,7 +693,8 @@ export async function deleteArchiveDir(relDir: string): Promise<boolean> {
  */
 export async function moveArchiveItem(relFrom: string, relTo: string): Promise<boolean> {
   const config = await loadConfig()
-  if (!config) return false
+  if (!config)
+    return false
 
   const archivePath = config.archivePath || `/`
   const baseDir = archivePath.endsWith(`/`) ? archivePath : `${archivePath}/`
@@ -730,7 +750,7 @@ async function moveFile(
   // GET 源文件内容
   const getResp = await proxyFetch(fromUrl, {
     method: `GET`,
-    headers: { 'Authorization': authHeader },
+    headers: { Authorization: authHeader },
   })
   if (!getResp.ok) {
     console.error(`[WebDAV Archive] 移动: GET 源文件失败 ${getResp.status}`)
@@ -756,7 +776,7 @@ async function moveFile(
   // DELETE 源
   const delResp = await proxyFetch(fromUrl, {
     method: `DELETE`,
-    headers: { 'Authorization': authHeader },
+    headers: { Authorization: authHeader },
   })
   if (!delResp.ok && delResp.status !== 404) {
     console.warn(`[WebDAV Archive] 移动: PUT 成功但 DELETE 源失败 ${delResp.status}`)
@@ -783,10 +803,12 @@ async function moveDir(
   // 递归查找源目录节点
   function findNode(nodes: ArchiveDirNode[], relPath: string): ArchiveDirNode | null {
     for (const node of nodes) {
-      if (node.relPath === relPath) return node
+      if (node.relPath === relPath)
+        return node
       if (node.children.length) {
         const found = findNode(node.children, relPath)
-        if (found) return found
+        if (found)
+          return found
       }
     }
     return null
@@ -799,8 +821,8 @@ async function moveDir(
   }
 
   // 收集该目录下所有文件（递归所有子目录）
-  function collectFiles(node: ArchiveDirNode): { relDir: string; filename: string }[] {
-    const files: { relDir: string; filename: string }[] = []
+  function collectFiles(node: ArchiveDirNode): { relDir: string, filename: string }[] {
+    const files: { relDir: string, filename: string }[] = []
     for (const f of node.files) {
       files.push({ relDir: f.relDir, filename: f.filename })
     }
@@ -816,24 +838,26 @@ async function moveDir(
     const targetDirUrl = buildFn(cleanTo)
     await proxyFetch(targetDirUrl, {
       method: `MKCOL`,
-      headers: { 'Authorization': authHeader },
+      headers: { Authorization: authHeader },
     })
     console.warn(`[WebDAV Archive] 移动目录: 源目录 "${cleanFrom}" 下无文件，已在目标创建`)
     // 无论 MKCOL 成败（可能已存在），都 DELETE 源目录完成移动
     const delResp = await proxyFetch(fromUrl, {
       method: `DELETE`,
-      headers: { 'Authorization': authHeader },
+      headers: { Authorization: authHeader },
     })
     return delResp.ok || delResp.status === 404
   }
 
   // 逐个移动文件
   for (const file of allFiles) {
-    // 源：cleanFrom / relDir / filename
-    // 目标：cleanTo / relDir / filename
-    const relSuffix = file.relDir ? `${file.relDir}/${file.filename}` : file.filename
-    const srcUrl = buildFn(`${cleanFrom}/${relSuffix}`)
-    const dstUrl = buildFn(`${cleanTo}/${relSuffix}`)
+    // 计算文件相对于源目录的路径（不能直接用 file.relDir，那是相对于归档根的）
+    const fileFullPath = file.relDir ? `${file.relDir}/${file.filename}` : file.filename
+    const relativePath = fileFullPath.startsWith(`${cleanFrom}/`)
+      ? fileFullPath.slice(cleanFrom.length + 1)
+      : file.filename
+    const srcUrl = buildFn(fileFullPath)
+    const dstUrl = buildFn(`${cleanTo}/${relativePath}`)
 
     const ok = await moveFile(srcUrl, dstUrl, authHeader)
     if (!ok) {
@@ -845,7 +869,7 @@ async function moveDir(
   // 所有文件移动成功后，DELETE 源目录（含所有空子目录）
   const delResp = await proxyFetch(fromUrl, {
     method: `DELETE`,
-    headers: { 'Authorization': authHeader },
+    headers: { Authorization: authHeader },
   })
   if (!delResp.ok && delResp.status !== 404) {
     console.warn(`[WebDAV Archive] 移动目录: 文件移动成功但 DELETE 源目录失败 ${delResp.status}`)

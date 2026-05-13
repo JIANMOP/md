@@ -12,6 +12,8 @@ export interface Post {
   updateDatetime: Date
   parentId?: string | null
   collapsed?: boolean
+  /** WebDAV 归档目标目录（相对归档根），如 "folder1" 或 "folder1/sub" */
+  archiveDir?: string
 }
 
 export interface PostItemDragState {

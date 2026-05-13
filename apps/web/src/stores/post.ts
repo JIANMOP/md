@@ -1,5 +1,5 @@
-import type { DocumentData } from '@/utils/documentStorage'
 import type { Post } from '@/types/post'
+import type { DocumentData } from '@/utils/documentStorage'
 import { v4 as uuidv4 } from 'uuid'
 import DEFAULT_CONTENT from '@/assets/example/markdown.md?raw'
 import { documentStorage } from '@/utils/documentStorage'
@@ -243,7 +243,6 @@ export const usePostStore = defineStore(`post`, () => {
     // Getters
     getPostById,
     findIndexById,
-
     // Actions
     addPost,
     renamePost,

@@ -1,4 +1,5 @@
 import { toPng } from 'html-to-image'
+import { toast } from 'vue-sonner'
 import {
   downloadFile,
   downloadMD,
@@ -8,11 +9,10 @@ import {
   getHtmlContent,
   sanitizeTitle,
 } from '@/utils'
+import { exportToArchiveDir } from '@/utils/webdavArchive'
 import { usePostStore } from './post'
 import { useRenderStore } from './render'
 import { useUIStore } from './ui'
-import { exportToArchiveDir } from '@/utils/webdavArchive'
-import { toast } from 'vue-sonner'
 
 /**
  * 导出功能 Store
@@ -121,25 +121,30 @@ export const useExportStore = defineStore(`export`, () => {
     if (!currentPost)
       return
 
-    try {
-      const { store } = await import('@/utils/storage')
-      const targetDir = (await store.get('lastArchiveDir')) || ''
-      const result = await exportToArchiveDir(currentPost.content, currentPost.title, targetDir)
-      if (result) {
-        const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
-        toast.success(`已归档到 ${dirLabel}`)
-        // 触发归档完成事件，让 index.vue 刷新侧边栏并删除
-        window.dispatchEvent(new CustomEvent('archive-completed', {
-          detail: { title: currentPost.title },
-        }))
+    // 已有归档目录（包括空字符串表示根目录），直接使用
+    if (currentPost.archiveDir !== undefined) {
+      try {
+        const targetDir = currentPost.archiveDir || ''
+        const result = await exportToArchiveDir(currentPost.content, currentPost.title, targetDir)
+        if (result) {
+          const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
+          toast.success(`已归档到 ${dirLabel}`)
+          window.dispatchEvent(new CustomEvent('archive-completed', {
+            detail: { title: currentPost.title },
+          }))
+        }
+        else {
+          toast.error(`归档失败：WebDAV 未配置`)
+        }
       }
-      else {
-        toast.error(`归档失败：WebDAV 未配置`)
+      catch (error: any) {
+        toast.error(`归档失败：${error.message}`)
       }
+      return
     }
-    catch (error: any) {
-      toast.error(`归档失败：${error.message}`)
-    }
+
+    // 新建文档，弹目录选择器
+    toast.info('请先在右键菜单中归档此文档以选择目标目录')
   }
 
   return {

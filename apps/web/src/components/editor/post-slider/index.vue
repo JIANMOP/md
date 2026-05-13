@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckSquare, ChevronsDownUp, ChevronsUpDown, Cloud, Ellipsis, FileText, Plus, Regex, Replace, ReplaceAll, Search, X } from 'lucide-vue-next'
+import { CheckSquare, ChevronsDownUp, ChevronsUpDown, Ellipsis, FileText, Plus, Regex, Replace, ReplaceAll, Search, X } from 'lucide-vue-next'
 import { useConfirmStore } from '@/stores/confirm'
 import { useEditorStore } from '@/stores/editor'
 import { usePostStore } from '@/stores/post'
@@ -466,13 +466,13 @@ onUnmounted(() => {
   window.removeEventListener('archive-completed', handleArchiveCompleted)
 })
 
-
 /** 将归档文件加载到编辑器（同名文档则覆盖，否则新建） */
-function openArchiveInEditor(content: string, title: string) {
+function openArchiveInEditor(content: string, title: string, relDir: string) {
   // 查找是否有同名文档
   const existing = postStore.posts.find(p => p.title === title)
   if (existing) {
-    // 已有同名 → 覆盖内容
+    // 已有同名 → 覆盖内容 + 更新归档目录
+    existing.archiveDir = relDir
     postStore.updatePostContent(existing.id, content)
     if (editor.value) {
       const ed = toRaw(editor.value)
@@ -486,6 +486,7 @@ function openArchiveInEditor(content: string, title: string) {
     // 没有同名 → 新建文档
     postStore.addPost(title, null)
     const newPost = postStore.posts[postStore.posts.length - 1]
+    newPost.archiveDir = relDir
     postStore.updatePostContent(newPost.id, content)
     if (editor.value) {
       const ed = toRaw(editor.value)
@@ -514,49 +515,6 @@ const selectProps = computed(() => ({
 function toggleSelectMode() {
   isSelectMode.value = !isSelectMode.value
   selectedPostIds.value = []
-}
-
-/** 将选中的文档归档到 WebDAV */
-async function archiveSelectedToWebDAV() {
-  if (!selectedPostIds.value.length) {
-    toast.error('请先选择要归档的文档')
-    return
-  }
-
-  // 获取当前归档侧边栏浏览的子目录
-  const targetDir = webdavBrowserRef.value?.currentDirRelPath || ''
-
-  // 批量归档选中文档
-  const { exportToArchiveDir } = await import('@/utils/webdavArchive')
-  let successCount = 0
-  let failCount = 0
-  const successIds: string[] = []
-  for (const id of selectedPostIds.value) {
-    const post = postStore.getPostById(id)
-    if (post) {
-      try {
-        await exportToArchiveDir(post.content, post.title, targetDir)
-        successCount++
-        successIds.push(id)
-      }
-      catch {
-        failCount++
-      }
-    }
-  }
-  if (successCount > 0) {
-    const dirLabel = targetDir ? `「${targetDir}」` : '归档根目录'
-    toast.success(`已归档 ${successCount} 篇到 ${dirLabel}`)
-    // 刷新归档列表 + 删除已归档的文档
-    for (const id of successIds) {
-      postStore.delPost(id)
-    }
-    selectedPostIds.value = []
-    webdavBrowserRef.value?.loadFiles()
-  }
-  if (failCount > 0) {
-    toast.error(`${failCount} 篇归档失败`)
-  }
 }
 
 function toggleSelectPost(id: string) {
@@ -1016,14 +974,6 @@ function handleDragEnd() {
                 @click="exportSelected"
               >
                 <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              </button>
-              <button
-                class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
-                title="归档到 WebDAV"
-                :disabled="!selectedPostIds.length || !hasArchiveConfig"
-                @click="archiveSelectedToWebDAV"
-              >
-                <Cloud class="size-4" />
               </button>
               <button
                 class="flex flex-1 items-center justify-center rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"

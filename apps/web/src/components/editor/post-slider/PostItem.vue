@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { Post, PostItemProps } from '@/types/post'
+import type { ArchiveDirNode } from '@/utils/webdavArchive'
 import {
   ChevronRight,
-  Copy,
   Cloud,
+  Copy,
   Edit3,
   Ellipsis,
   FileDown,
@@ -18,9 +19,18 @@ import { useTemplateStore } from '@/stores/template'
 import { useUIStore } from '@/stores/ui'
 import { downloadMD } from '@/utils'
 
-const hasArchiveConfig = ref(false)
-
 const props = defineProps<PostItemProps>()
+const hasArchiveConfig = ref(false)
+/** 目录选择弹窗状态 */
+const showDirPicker = ref(false)
+/** 待归档的 postId（选择目录后执行） */
+const pendingArchivePostId = ref('')
+/** 归档目录树 */
+const archiveTree = ref<ArchiveDirNode[]>([])
+/** 选中目录路径 */
+const selectedDir = ref('')
+/** 目录树展开状态 */
+const expandedDirs = ref(new Set<string>())
 
 const postStore = usePostStore()
 const templateStore = useTemplateStore()
@@ -36,20 +46,89 @@ checkConfig()
 
 async function archiveToWebDAV(postId: string) {
   const post = posts.value.find(p => p.id === postId)
-  if (!post) return
-  const [{ exportToArchiveDir }, { store }] = await Promise.all([
+  if (!post)
+    return
+
+  // 已有归档目录（包括空字符串表示根目录），直接使用
+  if (post.archiveDir !== undefined) {
+    const [{ exportToArchiveDir }] = await Promise.all([
+      import('@/utils/webdavArchive'),
+    ])
+    try {
+      await exportToArchiveDir(post.content, post.title, post.archiveDir || '')
+      const dirLabel = post.archiveDir ? `「${post.archiveDir}」` : `归档根目录`
+      toast.success(`「${post.title}」已归档到 ${dirLabel}`)
+      window.dispatchEvent(new CustomEvent('archive-completed', {
+        detail: { title: post.title },
+      }))
+    }
+    catch (error: any) {
+      toast.error(`归档失败：${error.message}`)
+    }
+    return
+  }
+
+  // 首次归档，弹出目录选择器
+  await showArchiveDirPicker(postId)
+}
+
+/** 弹出归档目录选择器 */
+async function showArchiveDirPicker(postId: string) {
+  const post = posts.value.find(p => p.id === postId)
+  if (!post)
+    return
+
+  const [{ listArchiveTree, checkArchiveConfigured }] = await Promise.all([
     import('@/utils/webdavArchive'),
-    import('@/utils/storage'),
   ])
-  const targetDir = (await store.get('lastArchiveDir')) || ''
+
+  const configured = await checkArchiveConfigured()
+  if (!configured) {
+    toast.error('请先配置归档目录')
+    return
+  }
+
+  archiveTree.value = await listArchiveTree()
+  selectedDir.value = ''
+  expandedDirs.value = new Set()
+  pendingArchivePostId.value = postId
+  showDirPicker.value = true
+}
+
+/** 选中目录 */
+function selectArchiveDir(dirPath: string) {
+  selectedDir.value = dirPath
+}
+
+/** 展开/收起目录树 */
+function togglePickerDir(dirPath: string) {
+  if (expandedDirs.value.has(dirPath)) {
+    expandedDirs.value.delete(dirPath)
+  }
+  else {
+    expandedDirs.value.add(dirPath)
+  }
+}
+
+/** 确认归档 */
+async function confirmArchive() {
+  const post = posts.value.find(p => p.id === pendingArchivePostId.value)
+  if (!post)
+    return
+
+  const [{ exportToArchiveDir }] = await Promise.all([
+    import('@/utils/webdavArchive'),
+  ])
   try {
+    const targetDir = selectedDir.value
     await exportToArchiveDir(post.content, post.title, targetDir)
+    post.archiveDir = targetDir
     const dirLabel = targetDir ? `「${targetDir}」` : `归档根目录`
     toast.success(`「${post.title}」已归档到 ${dirLabel}`)
-    // 触发归档完成事件，让 index.vue 刷新侧边栏并删除
     window.dispatchEvent(new CustomEvent('archive-completed', {
       detail: { title: post.title },
     }))
+    showDirPicker.value = false
   }
   catch (error: any) {
     toast.error(`归档失败：${error.message}`)
@@ -139,6 +218,15 @@ function commitInlineRename() {
 
 function cancelInlineRename() {
   inlineEditId.value = null
+}
+
+/** 统计目录中的文件数量（递归） */
+function getDirFilesCount(node: ArchiveDirNode): number {
+  let count = node.files.length
+  for (const child of node.children) {
+    count += getDirFilesCount(child)
+  }
+  return count
 }
 </script>
 
@@ -277,4 +365,105 @@ function cancelInlineRename() {
       />
     </div>
   </div>
+
+  <!-- 归档目录选择弹窗 -->
+  <Teleport to="body">
+    <div
+      v-if="showDirPicker"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      @click.self="showDirPicker = false"
+    >
+      <div class="bg-background border border-border rounded-xl shadow-xl w-80 max-h-[70vh] flex flex-col">
+        <!-- 弹窗标题 -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-border/40 shrink-0">
+          <span class="text-sm font-medium">选择归档目录</span>
+          <button
+            class="inline-flex items-center justify-center size-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            @click="showDirPicker = false"
+          >
+            <span class="text-lg leading-none">&times;</span>
+          </button>
+        </div>
+        <!-- 目录树 -->
+        <div class="flex-1 overflow-y-auto thin-scrollbar px-2 py-2">
+          <!-- 根目录选项 -->
+          <div
+            class="flex items-center gap-2 px-2 py-[7px] rounded-lg cursor-pointer transition-colors text-[13px]"
+            :class="selectedDir === '' ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'"
+            @click="selectArchiveDir('')"
+          >
+            <Cloud class="size-3.5 shrink-0 text-muted-foreground/60" />
+            <span class="truncate">归档根目录</span>
+          </div>
+          <template v-for="node in archiveTree" :key="node.relPath || node.href">
+            <!-- 目录节点 -->
+            <div v-if="node.name">
+              <div
+                class="flex items-center gap-1 px-2 py-[7px] rounded-lg cursor-pointer transition-colors text-[13px]"
+                :class="selectedDir === node.relPath ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'"
+                @click="selectArchiveDir(node.relPath)"
+              >
+                <ChevronRight
+                  class="size-3 shrink-0 text-muted-foreground/50 transition-transform"
+                  :class="{ 'rotate-90': expandedDirs.has(node.relPath) }"
+                  @click.stop="togglePickerDir(node.relPath)"
+                />
+                <Cloud class="size-3.5 shrink-0 text-muted-foreground/60" />
+                <span class="truncate flex-1">{{ node.name }}</span>
+                <span class="text-[10px] text-muted-foreground/40 tabular-nums">{{ getDirFilesCount(node) }}</span>
+              </div>
+              <!-- 展开的子目录 -->
+              <div v-if="expandedDirs.has(node.relPath)" class="ml-4 border-l border-border/40 pl-1.5">
+                <template v-for="child in node.children" :key="child.relPath">
+                  <div
+                    class="flex items-center gap-1 px-2 py-[7px] rounded-lg cursor-pointer transition-colors text-[13px]"
+                    :class="selectedDir === child.relPath ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'"
+                    @click="selectArchiveDir(child.relPath)"
+                  >
+                    <ChevronRight
+                      class="size-3 shrink-0 text-muted-foreground/50 transition-transform"
+                      :class="{ 'rotate-90': expandedDirs.has(child.relPath) }"
+                      @click.stop="togglePickerDir(child.relPath)"
+                    />
+                    <Cloud class="size-3.5 shrink-0 text-muted-foreground/60" />
+                    <span class="truncate flex-1">{{ child.name }}</span>
+                    <span class="text-[10px] text-muted-foreground/40 tabular-nums">{{ getDirFilesCount(child) }}</span>
+                  </div>
+                  <!-- 更深层展开 -->
+                  <div v-if="expandedDirs.has(child.relPath)" class="ml-4 border-l border-border/40 pl-1.5">
+                    <template v-for="subChild in child.children" :key="subChild.relPath">
+                      <div
+                        class="flex items-center gap-1 px-2 py-[7px] rounded-lg cursor-pointer transition-colors text-[13px]"
+                        :class="selectedDir === subChild.relPath ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'"
+                        @click="selectArchiveDir(subChild.relPath)"
+                      >
+                        <Cloud class="size-3.5 shrink-0 text-muted-foreground/60" />
+                        <span class="truncate flex-1">{{ subChild.name }}</span>
+                        <span class="text-[10px] text-muted-foreground/40 tabular-nums">{{ getDirFilesCount(subChild) }}</span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+        <!-- 操作栏 -->
+        <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-border/40 shrink-0">
+          <button
+            class="px-3 py-1.5 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            @click="showDirPicker = false"
+          >
+            取消
+          </button>
+          <button
+            class="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            @click="confirmArchive"
+          >
+            归档到此目录
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
